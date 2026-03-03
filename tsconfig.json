@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "declaration": true,
+
+    "declarationMap": true
+  },
+  "include": ["src", "src/*.d.ts", "types/encryptjs.d.ts"],
+  "typeRoots": ["./types", "./node_modules/@types"]
+}

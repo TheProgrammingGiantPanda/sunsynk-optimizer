@@ -1,0 +1,35 @@
+{
+  "name": "sunsync-mincharge",
+  "version": "0.1.0",
+  "description": "TypeScript client to authenticate to api.sunsync.net and set minimum charge price",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "example": "tsc -p tsconfig.json && node dist/example.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "sunsync",
+    "sunsynk",
+    "api",
+    "mincharge",
+    "charging"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "base64-string": "^1.1.3",
+    "encryptjs": "^2.0.0",
+    "jsencrypt": "^3.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.6.0"
+  }
+}
