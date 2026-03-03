@@ -4,21 +4,19 @@ import crypto from 'crypto';
 export interface ClientOptions {
   baseUrl?: string;
   authPath?: string;
-  minChargePath?: string;
 }
 
 export default class SunsyncClient {
   baseUrl: string;
   authPath: string;
-  minChargePath: string;
   token: string | null;
   axios: AxiosInstance;
   getPublicKeyPath: string;
+
   constructor(options: ClientOptions = {}) {
     this.baseUrl = options.baseUrl || 'https://api.sunsynk.net';
     this.authPath = options.authPath || '/oauth/token/new';
     this.getPublicKeyPath = '/anonymous/publicKey';
-    this.minChargePath = options.minChargePath || '/settings/min_charge';
     this.token = null;
     this.axios = axios.create({ baseURL: this.baseUrl, timeout: 10000 });
   }
@@ -106,33 +104,77 @@ export default class SunsyncClient {
     }
   }
 
-  async setMinCharge(
-    minPrice: number | string,
-    options: { token?: string; fieldName?: string } = {}
-  ): Promise<any> {
-    if (typeof minPrice !== 'number' && typeof minPrice !== 'string') {
-      throw new Error('minPrice must be a number or numeric string');
-    }
+  async getPlants(): Promise<any[]> {
+    if (!this.token)
+      throw new Error('Authentication required: call login() first');
 
+    const res = await this.axios.get('/api/v1/plants', {
+      params: { lan: 'en', page: 1, limit: 100 },
+      headers: this._authHeaders()
+    });
+    return res.data?.data?.infos ?? [];
+  }
+
+  async getPlant(plantId: string | number): Promise<any> {
+    if (!this.token)
+      throw new Error('Authentication required: call login() first');
+
+    const res = await this.axios.get(`/api/v1/plant/${plantId}`, {
+      params: { lan: 'en' },
+      headers: this._authHeaders()
+    });
+    return res.data?.data ?? res.data;
+  }
+
+  async setMinCharge(
+    plantId: string | number,
+    minPricePence: number | string,
+    options: { token?: string } = {}
+  ): Promise<any> {
     const token = options.token || this.token;
     if (!token)
-      throw new Error(
-        'Authentication required: call login() first or pass { token }'
-      );
+      throw new Error('Authentication required: call login() first or pass { token }');
 
-    const fieldName = options.fieldName || 'min_price';
-    const payload: Record<string, unknown> = { [fieldName]: minPrice };
+    // Fetch current plant data to preserve all existing settings
+    const plantRes = await this.axios.get(`/api/v1/plant/${plantId}`, {
+      params: { lan: 'en' },
+      headers: this._authHeaders(token)
+    });
+    const plant = plantRes.data?.data ?? plantRes.data;
+
+    const products: any[] = plant?.products ?? [];
+
+    // Update ratesThreshold for direction=1 (import/buy rate threshold)
+    const updatedProducts = products.map((p: any) =>
+      p.direction === 1 ? { ...p, ratesThreshold: String(minPricePence) } : p
+    );
+    if (!products.some((p: any) => p.direction === 1)) {
+      updatedProducts.push({ direction: 1, ratesThreshold: String(minPricePence) });
+    }
+
+    // Strip server-generated fields from charges
+    const charges = (plant?.charges ?? []).map(({ price, type, startRange, endRange }: any) => ({
+      price, type, startRange, endRange
+    }));
+
+    const payload = {
+      id: String(plantId),
+      currency: plant?.currency?.id ?? plant?.currency,
+      invest: plant?.invest ?? 0,
+      charges,
+      products: updatedProducts
+    };
 
     try {
-      const res = await this.axios.put(this.minChargePath, payload, {
-        headers: this._authHeaders(token)
-      });
+      const res = await this.axios.post(
+        `/api/v1/plant/${plantId}/income`,
+        payload,
+        { headers: { ...this._authHeaders(token), 'Content-Type': 'application/json' } }
+      );
       return res.data;
     } catch (err: any) {
       if (err.response) {
-        const msg = `setMinCharge failed: ${
-          err.response.status
-        } ${JSON.stringify(err.response.data)}`;
+        const msg = `setMinCharge failed: ${err.response.status} ${JSON.stringify(err.response.data)}`;
         const e = new Error(msg) as any;
         e.response = err.response;
         throw e;
@@ -144,10 +186,10 @@ export default class SunsyncClient {
   async loginAndSetMinCharge(
     usernameOrEmail: string,
     password: string,
-    minPrice: number | string,
-    options: { token?: string; fieldName?: string } = {}
+    plantId: string | number,
+    minPricePence: number | string
   ): Promise<any> {
     await this.login(usernameOrEmail, password);
-    return this.setMinCharge(minPrice, options);
+    return this.setMinCharge(plantId, minPricePence);
   }
 }
