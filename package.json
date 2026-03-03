@@ -1,7 +1,7 @@
 {
   "name": "sunsync-mincharge",
   "version": "0.1.0",
-  "description": "TypeScript client to authenticate to api.sunsync.net and set minimum charge price",
+  "description": "Home Assistant add-on that optimises Sunsynk battery charging using Octopus Agile prices and Solcast solar forecasts. Fetches live battery state from HA, calculates cheapest grid import slots before peak, sets the Sunsynk min charge threshold, and publishes results back to HA sensors.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
