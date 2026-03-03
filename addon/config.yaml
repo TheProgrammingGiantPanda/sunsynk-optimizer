@@ -1,0 +1,56 @@
+name: "Sunsynk Optimizer"
+version: "1.0.0"
+slug: "sunsynk_optimizer"
+description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
+url: "https://github.com/your-repo/sunsynk"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+  - i386
+startup: application
+boot: auto
+map: []
+options:
+  sunsynk_username: ""
+  sunsynk_password: ""
+  ha_url: "http://homeassistant.local:8123"
+  ha_token: ""
+  ha_battery_soc_entity: "sensor.solarsynkv3_2310140043_battery_bms_soc"
+  ha_battery_voltage_entity: "sensor.solarsynkv3_2310140043_battery_voltage"
+  ha_battery_max_current_entity: "sensor.solarsynkv3_2310140043_batterymaxcurrentcharge"
+  ha_battery_capacity_ah_entity: "sensor.solarsynkv3_2310140043_battery_capacity"
+  solcast_api_key: ""
+  solcast_site_pv1: ""
+  solcast_site_pv2: ""
+  octopus_product: "AGILE-24-04-03"
+  octopus_tariff: "E-1R-AGILE-24-04-03-G"
+  battery_capacity_wh: 10000
+  battery_fill_rate_wh: 2000
+  avg_consumption_wh: 500
+  peak_hour: 16
+  min_charge_floor_pence: 10
+  forecast_fetch_times: "06:00,12:00"
+  price_interval_minutes: 30
+schema:
+  sunsynk_username: str
+  sunsynk_password: password
+  ha_url: str
+  ha_token: password
+  ha_battery_soc_entity: str
+  ha_battery_voltage_entity: str
+  ha_battery_max_current_entity: str
+  ha_battery_capacity_ah_entity: str
+  solcast_api_key: password
+  solcast_site_pv1: str
+  solcast_site_pv2: str
+  octopus_product: str
+  octopus_tariff: str
+  battery_capacity_wh: int
+  battery_fill_rate_wh: int
+  avg_consumption_wh: int
+  peak_hour: int
+  min_charge_floor_pence: int
+  forecast_fetch_times: str
+  price_interval_minutes: int
