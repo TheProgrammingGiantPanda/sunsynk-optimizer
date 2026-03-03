@@ -1,5 +1,4 @@
 import axios, { AxiosInstance } from 'axios';
-import JSEncrypt from 'jsencrypt';
 import crypto from 'crypto';
 
 export interface ClientOptions {
@@ -15,8 +14,6 @@ export default class SunsyncClient {
   token: string | null;
   axios: AxiosInstance;
   getPublicKeyPath: string;
-  private _nonce: any;
-
   constructor(options: ClientOptions = {}) {
     this.baseUrl = options.baseUrl || 'https://api.sunsynk.net';
     this.authPath = options.authPath || '/oauth/token/new';
@@ -24,14 +21,6 @@ export default class SunsyncClient {
     this.minChargePath = options.minChargePath || '/settings/min_charge';
     this.token = null;
     this.axios = axios.create({ baseURL: this.baseUrl, timeout: 10000 });
-    this.axios.interceptors.request.use((request) => {
-      console.log('Starting Request', JSON.stringify(request, null, 2));
-      return request;
-    });
-    // this.axios.interceptors.response.use((response) => {
-    //   console.log('Response:', JSON.stringify(response, null, 2));
-    //   return response;
-    // });
   }
 
   private _authHeaders(token?: string) {
@@ -40,46 +29,43 @@ export default class SunsyncClient {
     return { Authorization: `Bearer ${t}` };
   }
 
-  get nonce(): string {
-    this._nonce = this._nonce || Date.now().toString();
-    return this._nonce;
-  }
   async login(username: string, password: string): Promise<string> {
     if (!username || !password) {
       throw new Error('username/email and password required');
     }
 
-    const hash = crypto
-      .createHash('md5')
-      .update(`nonce=${this.nonce}&source=sunsynkPOWER_VIEW`)
-      .digest('hex');
+    const nonce = Date.now();
 
-    const publicKeyReuslt = await this.axios.get(this.getPublicKeyPath, {
-      params: {
-        source: 'sunsynk',
-        nonce: this.nonce,
-        sign: hash
-      }
+    const publicKeyResult = await this.axios.get(this.getPublicKeyPath, {
+      params: { source: 'sunsynk', nonce, sign: 'unused' }
     });
 
-    if (!publicKeyReuslt.status || publicKeyReuslt.status !== 200) {
-      throw new Error(`Failed to get public key: ${publicKeyReuslt.status}`);
+    if (!publicKeyResult.data?.data) {
+      throw new Error(`Failed to get public key`);
     }
 
-    const encrypt = new JSEncrypt();
-    encrypt.setKey(publicKeyReuslt.data.data);
+    const publicKey: string = publicKeyResult.data.data;
+    const sign = crypto
+      .createHash('md5')
+      .update(`nonce=${nonce}&source=sunsynk${publicKey.substring(0, 10)}`)
+      .digest('hex');
 
-    const encodedPassword = encrypt.encrypt(password);
-    if (!encodedPassword) {
-      throw new Error('Password encryption failed');
-    }
+    const pemKey = `-----BEGIN PUBLIC KEY-----\n${publicKey}\n-----END PUBLIC KEY-----`;
+    const encodedPassword = crypto
+      .publicEncrypt(
+        { key: pemKey, padding: crypto.constants.RSA_PKCS1_PADDING },
+        Buffer.from(password)
+      )
+      .toString('base64');
+
     const payload = {
-      areaCode: 'sunsynk',
-      client_id: 'csp-web',
-      grant_type: 'password',
+      sign,
+      nonce,
+      username,
       password: encodedPassword,
-      source: 'sunsynk',
-      username: username
+      grant_type: 'password',
+      client_id: 'csp-web',
+      source: 'sunsynk'
     } as Record<string, unknown>;
 
     try {
@@ -90,6 +76,9 @@ export default class SunsyncClient {
         }
       });
       const data = res.data || {};
+      if ((data as any).success === false) {
+        throw new Error(`API error ${(data as any).code}: ${(data as any).msg}`);
+      }
       const token =
         (data as any).access_token ||
         (data as any).token ||
@@ -99,7 +88,7 @@ export default class SunsyncClient {
         null;
       if (!token) {
         throw new Error(
-          'Login succeeded but no token found in response. Inspect response structure.'
+          `No token found in response: ${JSON.stringify(data)}`
         );
       }
       this.token = token;
