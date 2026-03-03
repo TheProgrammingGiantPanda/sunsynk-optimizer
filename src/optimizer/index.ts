@@ -4,7 +4,7 @@ import { getSolarForecast, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleInterval } from './scheduler';
-import { getEntityState } from './homeassistant';
+import { getEntityState, setState } from './homeassistant';
 
 async function main() {
   const config = loadConfig();
@@ -95,16 +95,40 @@ async function main() {
       return;
     }
 
-    const threshold = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates);
 
     try {
-      await client.setMinCharge(plantId, threshold);
+      await client.setMinCharge(plantId, result.threshold);
       console.log(
-        `[${new Date().toISOString()}] Set min charge threshold to ${threshold}p ` +
+        `[${new Date().toISOString()}] Set min charge threshold to ${result.threshold}p ` +
         `(battery ${batteryPct}%)`
       );
     } catch (err) {
       console.error('[optimizer] Failed to set min charge:', err);
+    }
+
+    // Push results to HA sensors
+    try {
+      const ha = (id: string, state: string | number, attrs: Record<string, unknown> = {}) =>
+        setState(config.haUrl, config.haToken, id, state, attrs);
+
+      await Promise.all([
+        ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' }),
+        ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' }),
+        ha('sensor.sunsynk_optimizer_pv1_total',          result.pv1Total,           { unit_of_measurement: 'Wh',     friendly_name: 'PV1 forecast to peak' }),
+        ha('sensor.sunsynk_optimizer_pv2_total',          result.pv2Total,           { unit_of_measurement: 'Wh',     friendly_name: 'PV2 forecast to peak' }),
+        ha('sensor.sunsynk_optimizer_pv_total',           result.pvTotal,            { unit_of_measurement: 'Wh',     friendly_name: 'PV total forecast to peak' }),
+        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage to peak' }),
+        ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' }),
+        ha('sensor.sunsynk_optimizer_battery_to_fill',    result.batteryToFill,      { unit_of_measurement: 'Wh',     friendly_name: 'Battery grid import needed' }),
+        ha('sensor.sunsynk_optimizer_battery_to_fill_no_pv', result.batteryToFillNoPV, { unit_of_measurement: 'Wh',  friendly_name: 'Battery grid import needed (no PV)' }),
+        ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' }),
+        ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' }),
+        ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
+      ]);
+      console.log('[optimizer] HA sensors updated');
+    } catch (err) {
+      console.error('[optimizer] Failed to update HA sensors:', err);
     }
   });
 }

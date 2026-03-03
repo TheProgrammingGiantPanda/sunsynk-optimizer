@@ -27,6 +27,20 @@ export async function getEntityState(
 }
 
 /**
+ * Sets a HA sensor state with optional attributes.
+ * Creates the entity if it doesn't already exist.
+ */
+export async function setState(
+  haUrl: string,
+  haToken: string,
+  entityId: string,
+  state: string | number,
+  attributes: Record<string, unknown> = {}
+): Promise<void> {
+  await haClient(haUrl, haToken).post(`/states/${entityId}`, { state, attributes });
+}
+
+/**
  * Lists all entity IDs matching a search string — useful for discovering sensor names.
  */
 export async function findEntities(

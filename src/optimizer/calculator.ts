@@ -2,6 +2,21 @@ import { Config } from './config';
 import { ForecastSlot } from './solcast';
 import { PriceSlot } from './octopus';
 
+export interface CalculationResult {
+  threshold: number;         // pence — value set on Sunsynk
+  lowestPrice: number;       // £/kWh — cheapest Agile slot in window
+  pv1Total: number;          // Wh — PV array 1 forecast to peak
+  pv2Total: number;          // Wh — PV array 2 forecast to peak
+  pvTotal: number;           // Wh — combined PV forecast to peak
+  houseUsage: number;        // Wh — estimated house consumption to peak
+  batteryWatts: number;      // Wh — current battery charge
+  batteryToFill: number;     // Wh — grid import needed (accounting for solar)
+  batteryToFillNoPV: number; // Wh — grid import needed (ignoring solar)
+  surplus: number;           // Wh — pvTotal minus houseUsage
+  blocks: number;            // number of 30-min charging slots to buy
+  results: PriceSlot[];      // cheapest Agile slots in window, sorted ascending
+}
+
 /**
  * Calculate the minimum grid import price threshold (pence) to set on the Sunsynk inverter.
  *
@@ -9,8 +24,6 @@ import { PriceSlot } from './octopus';
  *
  * The threshold tells Sunsynk: "only charge the battery from the grid if the
  * current Agile price is below this value (pence/kWh)."
- *
- * @returns Price threshold in whole pence, or the floor if no charging needed.
  */
 export function calculate(
   config: Config,
@@ -18,14 +31,13 @@ export function calculate(
   pv1Forecasts: ForecastSlot[],
   pv2Forecasts: ForecastSlot[],
   agileRates: PriceSlot[]
-): number {
+): CalculationResult {
   const now = new Date();
 
   // Build peak time for today (local clock)
   const peakTime = new Date(now);
   peakTime.setHours(config.peakHour, 0, 0, 0);
   if (peakTime <= now) {
-    // Past today's peak — aim for tomorrow's peak
     peakTime.setDate(peakTime.getDate() + 1);
   }
 
@@ -33,10 +45,10 @@ export function calculate(
   // Solcast pv_estimate is in kW for a 30-min period → convert to Wh: * 500
   const WH_PER_KW_HALF_HOUR = 500;
 
-  let pvTotal = 0;
+  let pv1Total = 0;
+  let pv2Total = 0;
   let houseUsage = 0;
 
-  // Build a map of ISO-string → pv2 estimate for fast lookup
   const pv2Map = new Map<string, number>();
   for (const slot of pv2Forecasts) {
     pv2Map.set(slot.period_end, slot.pv_estimate);
@@ -45,30 +57,27 @@ export function calculate(
   for (const slot of pv1Forecasts) {
     const slotEnd = new Date(slot.period_end);
     if (slotEnd <= now || slotEnd > peakTime) continue;
-
-    const pv1Wh = slot.pv_estimate * WH_PER_KW_HALF_HOUR;
-    const pv2Wh = (pv2Map.get(slot.period_end) ?? 0) * WH_PER_KW_HALF_HOUR;
-    pvTotal += pv1Wh + pv2Wh;
+    pv1Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
+    pv2Total += (pv2Map.get(slot.period_end) ?? 0) * WH_PER_KW_HALF_HOUR;
     houseUsage += config.avgConsumptionWh;
   }
 
-  // If no forecast slots found (e.g. forecasts not yet fetched), add in
-  // any pv2 slots that cover the window in case pv1 is empty
-  if (pvTotal === 0 && pv2Forecasts.length > 0) {
+  // Fallback: if pv1 had no slots in window, use pv2 directly
+  if (pv1Total === 0 && pv2Total === 0 && pv2Forecasts.length > 0) {
     for (const slot of pv2Forecasts) {
       const slotEnd = new Date(slot.period_end);
       if (slotEnd <= now || slotEnd > peakTime) continue;
-      pvTotal += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
+      pv2Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
       houseUsage += config.avgConsumptionWh;
     }
   }
 
+  const pvTotal = pv1Total + pv2Total;
+
   // ── 2. How much battery capacity remains to be filled? ───────────────────
   const batteryWatts = (config.batteryCapacityWh * batteryPct) / 100;
   const surplus = pvTotal - houseUsage;
-
-  // If we have surplus solar → it will charge the battery, so we need less grid.
-  // If solar < house load → we need grid for both battery AND the net deficit.
+  const batteryToFillNoPV = config.batteryCapacityWh - batteryWatts;
   const batteryToFill =
     config.batteryCapacityWh -
     batteryWatts -
@@ -83,31 +92,24 @@ export function calculate(
 
   windowRates.sort((a, b) => a.value_inc_vat - b.value_inc_vat);
 
-  // Number of 30-min charging blocks required
-  const blocks = Math.ceil(batteryToFill / config.batteryFillRateWh);
+  const lowestPrice = windowRates.length > 0
+    ? windowRates[0].value_inc_vat / 100
+    : 0;
 
-  // ── 4. Special case: buy negative-price slots regardless ─────────────────
+  const blocks = Math.ceil(batteryToFill / config.batteryFillRateWh);
   const hasNegativeSlots = windowRates.some(r => r.value_inc_vat < 0);
 
+  let threshold: number;
+
   if (blocks < 1 && !hasNegativeSlots) {
-    // Battery is already full (or will be filled by solar) — use floor
-    console.log(
-      `[calculator] Battery ${batteryPct}% — no charging needed. ` +
-      `batteryToFill=${batteryToFill.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh. ` +
-      `Using floor ${config.minChargeFloorPence}p`
-    );
-    return config.minChargeFloorPence;
+    threshold = config.minChargeFloorPence;
+  } else if (!windowRates.length) {
+    threshold = config.minChargeFloorPence;
+  } else {
+    const blocksToUse = hasNegativeSlots && blocks < 1 ? 1 : blocks;
+    const idx = Math.min(blocksToUse - 1, windowRates.length - 1);
+    threshold = Math.max(Math.ceil(windowRates[idx].value_inc_vat), config.minChargeFloorPence);
   }
-
-  if (!windowRates.length) {
-    console.warn('[calculator] No Agile rates in window — using floor');
-    return config.minChargeFloorPence;
-  }
-
-  // The threshold = the price of the most expensive slot we're willing to buy
-  const blocksToUse = hasNegativeSlots && blocks < 1 ? 1 : blocks;
-  const idx = Math.min(blocksToUse - 1, windowRates.length - 1);
-  const threshold = Math.ceil(windowRates[idx].value_inc_vat);
 
   console.log(
     `[calculator] Battery ${batteryPct}%, batteryToFill=${batteryToFill.toFixed(0)} Wh, ` +
@@ -115,5 +117,18 @@ export function calculate(
     `surplus=${surplus.toFixed(0)} Wh, blocks=${blocks}, threshold=${threshold}p`
   );
 
-  return Math.max(threshold, config.minChargeFloorPence);
+  return {
+    threshold,
+    lowestPrice,
+    pv1Total: Math.floor(pv1Total),
+    pv2Total: Math.floor(pv2Total),
+    pvTotal: Math.floor(pvTotal),
+    houseUsage: Math.floor(houseUsage),
+    batteryWatts: Math.floor(batteryWatts),
+    batteryToFill: Math.floor(batteryToFill),
+    batteryToFillNoPV: Math.floor(batteryToFillNoPV),
+    surplus: Math.floor(surplus),
+    blocks,
+    results: windowRates,
+  };
 }
