@@ -5,7 +5,7 @@ vi.mock('axios');
 
 import fs from 'fs';
 import axios from 'axios';
-import { getMergedForecast, loadForecastCache, ForecastSlot } from '../solcast';
+import { getMergedForecast, loadForecastCache, tomorrowPvWh, ForecastSlot } from '../solcast';
 
 const FRESH_SLOT: ForecastSlot = {
   period_end: '2026-03-04T09:00:00Z',
@@ -55,6 +55,35 @@ describe('loadForecastCache', () => {
     mockFs.existsSync = vi.fn(() => true);
     mockFs.readFileSync = vi.fn(() => 'not-json') as any;
     expect(loadForecastCache()).toBeNull();
+  });
+});
+
+describe('tomorrowPvWh', () => {
+  it('returns 0 for an empty forecast', () => {
+    expect(tomorrowPvWh([])).toBe(0);
+  });
+
+  it('sums P50 Wh for slots whose period_end falls on tomorrow (UTC)', () => {
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+
+    const slots: ForecastSlot[] = [
+      // today — should be excluded
+      { period_end: new Date().toISOString().slice(0, 10) + 'T12:00:00Z', period: 'PT30M', pv_estimate: 2, pv_estimate10: 1, pv_estimate90: 3 },
+      // tomorrow — 2 kW × 0.5h × 1000 = 1000 Wh each
+      { period_end: tomorrowDate + 'T10:00:00Z', period: 'PT30M', pv_estimate: 2, pv_estimate10: 1, pv_estimate90: 3 },
+      { period_end: tomorrowDate + 'T10:30:00Z', period: 'PT30M', pv_estimate: 2, pv_estimate10: 1, pv_estimate90: 3 },
+    ];
+
+    expect(tomorrowPvWh(slots)).toBe(2000);
+  });
+
+  it('returns 0 when no slots match tomorrow', () => {
+    const slots: ForecastSlot[] = [
+      { period_end: '2020-01-01T12:00:00Z', period: 'PT30M', pv_estimate: 5, pv_estimate10: 1, pv_estimate90: 8 },
+    ];
+    expect(tomorrowPvWh(slots)).toBe(0);
   });
 });
 

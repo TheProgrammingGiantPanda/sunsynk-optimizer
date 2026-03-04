@@ -36,6 +36,8 @@ export interface Config {
   expensiveThresholdPercentile: number; // 0 = use fixed expensiveThresholdPence; 1–99 = compute dynamically
   carbonIntensityWeight: number;        // 0 = disabled; 0.1–1 blends carbon intensity into slot scoring
   carbonIntensityRegionId: number;      // National Grid ESO region ID (0 = national average)
+  lowSolarThresholdWh: number;          // 0 = disabled; if tomorrow P50 PV < this Wh, use backupMinSoc
+  backupMinSoc: number;                 // min SOC % when tomorrow solar is poor (default 40)
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -79,6 +81,8 @@ function fromOptions(o: Record<string, unknown>): Config {
     expensiveThresholdPercentile: Number(o['expensive_threshold_percentile'] ?? 0),
     carbonIntensityWeight: Number(o['carbon_intensity_weight'] ?? 0),
     carbonIntensityRegionId: Number(o['carbon_intensity_region_id'] ?? 0),
+    lowSolarThresholdWh: Number(o['low_solar_threshold_wh'] ?? 0),
+    backupMinSoc: Number(o['backup_min_soc'] ?? 40),
   };
 }
 
@@ -126,5 +130,7 @@ export function loadConfig(): Config {
     expensive_threshold_percentile: process.env.EXPENSIVE_THRESHOLD_PERCENTILE,
     carbon_intensity_weight: process.env.CARBON_INTENSITY_WEIGHT,
     carbon_intensity_region_id: process.env.CARBON_INTENSITY_REGION_ID,
+    low_solar_threshold_wh: process.env.LOW_SOLAR_THRESHOLD_WH,
+    backup_min_soc: process.env.BACKUP_MIN_SOC,
   });
 }

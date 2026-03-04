@@ -1,5 +1,5 @@
 name: "Sunsynk Optimizer"
-version: "1.1.0"
+version: "1.2.0"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
 url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
@@ -47,6 +47,8 @@ options:
   expensive_threshold_percentile: 0
   carbon_intensity_weight: 0.0
   carbon_intensity_region_id: 0
+  low_solar_threshold_wh: 0
+  backup_min_soc: 40
 schema:
   sunsynk_username: str
   sunsynk_password: password
@@ -82,3 +84,5 @@ schema:
   expensive_threshold_percentile: int?
   carbon_intensity_weight: float?
   carbon_intensity_region_id: int?
+  low_solar_threshold_wh: int?
+  backup_min_soc: int?

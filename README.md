@@ -122,6 +122,8 @@ If configured, the optimizer builds a model of heat pump power vs outdoor temper
 | `expensive_threshold_percentile` | `EXPENSIVE_THRESHOLD_PERCENTILE` | `0` | When set to 1–99, compute `expensive_threshold_pence` dynamically each price update as the Nth percentile of all available Agile rates. Makes the optimizer self-tuning as market prices shift. `0` = use the fixed value above. |
 | `min_charge_floor_pence` | `MIN_CHARGE_FLOOR_PENCE` | `10` | Minimum price threshold (p/kWh). Set to `0` to allow the threshold to drop to zero. Set negative to capture negative-price slots even when the battery is full. |
 | `min_discharge_soc` | `MIN_DISCHARGE_SOC` | `20` | Minimum battery SoC (%) before selling to the grid stops (`limitSoc` on the Sunsynk direction=0 product). Protects battery health. |
+| `low_solar_threshold_wh` | `LOW_SOLAR_THRESHOLD_WH` | `0` | If tomorrow's Solcast P50 forecast is below this value (Wh), the optimizer raises the minimum discharge SoC to `backup_min_soc` to protect against running flat on a poor solar day. `0` = disabled. |
+| `backup_min_soc` | `BACKUP_MIN_SOC` | `40` | Minimum discharge SoC (%) to use when tomorrow's solar forecast is below `low_solar_threshold_wh`. Has no effect when `low_solar_threshold_wh` is `0`. |
 
 ### Carbon intensity (optional)
 
@@ -220,6 +222,7 @@ After each price update the following sensors are written to Home Assistant:
 | Entity | Unit | Description |
 |---|---|---|
 | `sensor.sunsynk_optimizer_threshold` | p/kWh | Charge threshold set on Sunsynk |
+| `sensor.sunsynk_optimizer_effective_min_soc` | % | Active minimum discharge SoC — equals `min_discharge_soc` normally, or `backup_min_soc` when tomorrow's solar forecast is below `low_solar_threshold_wh` |
 | `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
 | `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
 | `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |

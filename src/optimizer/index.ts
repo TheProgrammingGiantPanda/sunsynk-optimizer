@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
-import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
+import { getMergedForecast, loadForecastCache, ForecastSlot, tomorrowPvWh } from './solcast';
 import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octopus';
 import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
@@ -322,6 +322,18 @@ async function main() {
       console.log(`[optimizer] Expensive threshold (p${pct}): ${expensiveThresholdPence}p/kWh`);
     }
 
+    // Dynamic minimum SOC: if tomorrow's P50 solar is below threshold, raise the floor
+    let effectiveMinSoc = config.minDischargeSoc;
+    if (config.lowSolarThresholdWh > 0 && pvForecasts.length > 0) {
+      const tomorrowWh = tomorrowPvWh(pvForecasts);
+      if (tomorrowWh < config.lowSolarThresholdWh) {
+        effectiveMinSoc = config.backupMinSoc;
+        console.log(`[optimizer] Low solar forecast tomorrow (${tomorrowWh} Wh < ${config.lowSolarThresholdWh} Wh threshold) — raising min SOC to ${effectiveMinSoc}%`);
+      } else {
+        console.log(`[optimizer] Solar forecast tomorrow: ${tomorrowWh} Wh — min SOC unchanged at ${effectiveMinSoc}%`);
+      }
+    }
+
     const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
@@ -353,7 +365,7 @@ async function main() {
       try {
         // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
         // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
-        await client.setMinCharge(plantId, result.threshold, effectiveSellThreshold, { limitSoc: config.minDischargeSoc });
+        await client.setMinCharge(plantId, result.threshold, effectiveSellThreshold, { limitSoc: effectiveMinSoc });
         console.log(`[optimizer] Set min charge threshold to ${result.threshold}p (battery ${batteryPct}%)`);
         lastThreshold = result.threshold;
         lastSellThreshold = effectiveSellThreshold ?? null;
@@ -374,6 +386,7 @@ async function main() {
 
       const writes: [string, Promise<unknown>][] = [
         ['threshold',          ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' })],
+        ['effective_min_soc',  ha('sensor.sunsynk_optimizer_effective_min_soc',  effectiveMinSoc,          { unit_of_measurement: '%', friendly_name: 'Effective minimum discharge SOC' })],
         ['expensive_slots',    ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` })],
         ['expensive_demand_wh', ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' })],
         ['lowest_price',       ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' })],
