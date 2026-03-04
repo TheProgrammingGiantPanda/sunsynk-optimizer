@@ -103,8 +103,18 @@ async function main() {
         getEntityState(config.haUrl, config.haToken, config.haBatteryMaxCurrentEntity),
         getEntityState(config.haUrl, config.haToken, config.haBatteryCapacityAhEntity),
       ]);
-      batteryFillRateWh = Math.round((voltage * maxCurrent) / 2);
-      batteryCapacityWh = Math.round(voltage * capacityAh);
+      const liveCapacity = Math.round(voltage * capacityAh);
+      const liveFillRate = Math.round((voltage * maxCurrent) / 2);
+      if (liveCapacity > 0) {
+        batteryCapacityWh = liveCapacity;
+      } else {
+        console.warn(`[optimizer] Battery capacity from HA is zero or invalid (${voltage}V × ${capacityAh}Ah), using config fallback: ${batteryCapacityWh} Wh`);
+      }
+      if (liveFillRate > 0) {
+        batteryFillRateWh = liveFillRate;
+      } else {
+        console.warn(`[optimizer] Battery fill rate from HA is zero or invalid (${voltage}V × ${maxCurrent}A), using config fallback: ${batteryFillRateWh} Wh/slot`);
+      }
       console.log(
         `[optimizer] Battery: ${voltage}V × ${capacityAh}Ah = ${batteryCapacityWh} Wh capacity, ` +
         `fill rate ${voltage}V × ${maxCurrent}A ÷ 2 = ${batteryFillRateWh} Wh/slot`
