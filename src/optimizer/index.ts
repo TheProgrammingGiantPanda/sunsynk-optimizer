@@ -1,4 +1,6 @@
 import './logger';
+import fs from 'fs';
+import path from 'path';
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
 import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
@@ -9,6 +11,41 @@ import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
+
+// ── Daily accumulator persistence ────────────────────────────────────────────
+
+const DATA_DIR = fs.existsSync('/data') ? '/data' : process.cwd();
+const ACCUMULATORS_PATH = path.join(DATA_DIR, 'daily_accumulators.json');
+
+interface DailyAccumulators {
+  date: string;
+  savingVsPeakPence: number;
+  savingVsStandardPence: number;
+  pvSavingPence: number;
+  exportIncomePence: number;
+}
+
+function loadAccumulators(today: string): DailyAccumulators {
+  try {
+    const raw = fs.readFileSync(ACCUMULATORS_PATH, 'utf-8');
+    const saved: DailyAccumulators = JSON.parse(raw);
+    if (saved.date === today) {
+      console.log(`[optimizer] Restored daily accumulators for ${today} from disk`);
+      return saved;
+    }
+  } catch {
+    // No file or parse error — start fresh
+  }
+  return { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0 };
+}
+
+function saveAccumulators(acc: DailyAccumulators): void {
+  try {
+    fs.writeFileSync(ACCUMULATORS_PATH, JSON.stringify(acc), 'utf-8');
+  } catch (err) {
+    console.warn('[optimizer] Failed to persist daily accumulators:', err);
+  }
+}
 
 async function main() {
   const config = loadConfig();
@@ -56,12 +93,8 @@ async function main() {
   // Pre-populate from disk cache so price updates work immediately on restart
   let pvForecasts: ForecastSlot[] = loadForecastCache() ?? [];
 
-  // Daily savings accumulators — reset when the calendar date changes
-  let savingDate = new Date().toISOString().slice(0, 10);
-  let dailySavingVsPeakPence = 0;
-  let dailySavingVsStandardPence = 0;
-  let dailyPvSavingPence = 0;
-  let dailyExportIncomePence = 0;
+  // Daily savings accumulators — restored from disk on startup, reset when calendar date changes
+  let accumulators = loadAccumulators(new Date().toISOString().slice(0, 10));
   let slotProfile: number[] | undefined;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
@@ -257,17 +290,14 @@ async function main() {
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
-    if (today !== savingDate) {
-      dailySavingVsPeakPence = 0;
-      dailySavingVsStandardPence = 0;
-      dailyPvSavingPence = 0;
-      dailyExportIncomePence = 0;
-      savingDate = today;
+    if (today !== accumulators.date) {
+      accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0 };
     }
-    dailySavingVsPeakPence     += result.savingVsPeakPence;
-    dailySavingVsStandardPence += result.savingVsStandardPence;
-    dailyPvSavingPence         += result.pvSavingPence;
-    if (result.sellThreshold > 0) dailyExportIncomePence += result.exportIncomePence;
+    accumulators.savingVsPeakPence     += result.savingVsPeakPence;
+    accumulators.savingVsStandardPence += result.savingVsStandardPence;
+    accumulators.pvSavingPence         += result.pvSavingPence;
+    if (result.sellThreshold > 0) accumulators.exportIncomePence += result.exportIncomePence;
+    saveAccumulators(accumulators);
 
     try {
       // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
@@ -305,10 +335,10 @@ async function main() {
         ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
         ha('sensor.sunsynk_optimizer_actual_cost',        result.actualCostPence,    { unit_of_measurement: 'p', friendly_name: 'Planned charge cost (Agile)' }),
         ha('sensor.sunsynk_optimizer_peak_slot_price',    result.peakSlotPricePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Agile price at peak hour' }),
-        ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(dailySavingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
-        ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(dailySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
-        ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
-        ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(dailyExportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' }),
+        ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(accumulators.savingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
+        ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
+        ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
+        ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' }),
         ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
         ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
         ...(result.exportableWh > 0 ? [ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh', friendly_name: 'Energy available to sell to grid' })] : []),
