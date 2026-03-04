@@ -42,6 +42,11 @@ options:
   octopus_export_product: ""
   octopus_export_tariff: ""
   battery_round_trip_efficiency: 0.9
+  min_discharge_soc: 20
+  sunsynk_plant_id: ""
+  expensive_threshold_percentile: 0
+  carbon_intensity_weight: 0.0
+  carbon_intensity_region_id: 0
 schema:
   sunsynk_username: str
   sunsynk_password: password
@@ -72,3 +77,8 @@ schema:
   octopus_export_product: str
   octopus_export_tariff: str
   battery_round_trip_efficiency: float
+  min_discharge_soc: int
+  sunsynk_plant_id: str?
+  expensive_threshold_percentile: int?
+  carbon_intensity_weight: float?
+  carbon_intensity_region_id: int?

@@ -39,6 +39,7 @@ All options can be set either via the Home Assistant add-on UI (stored in `/data
 |---|---|---|---|
 | `sunsynk_username` | `SUNSYNK_USER` | — | Sunsynk portal email |
 | `sunsynk_password` | `SUNSYNK_PASS` | — | Sunsynk portal password |
+| `sunsynk_plant_id` | `SUNSYNK_PLANT_ID` | `""` | Target a specific plant by ID. Leave blank to use the first plant on the account. |
 | `ha_url` | `HA_URL` | `http://homeassistant.local:8123` | Home Assistant base URL |
 | `ha_token` | `HA_TOKEN` | — | HA long-lived access token |
 
@@ -117,8 +118,19 @@ If configured, the optimizer builds a model of heat pump power vs outdoor temper
 
 | Option | Env var | Default | Description |
 |---|---|---|---|
-| `expensive_threshold_pence` | `EXPENSIVE_THRESHOLD_PENCE` | `25` | Slots at or above this price (p/kWh) are considered "expensive" — the battery should cover house load during these periods so you avoid importing at peak rates. Adjust to match your typical evening peak. |
+| `expensive_threshold_pence` | `EXPENSIVE_THRESHOLD_PENCE` | `25` | Slots at or above this price (p/kWh) are considered "expensive" — the battery should cover house load during these periods so you avoid importing at peak rates. Used as a fixed value unless `expensive_threshold_percentile` is set. |
+| `expensive_threshold_percentile` | `EXPENSIVE_THRESHOLD_PERCENTILE` | `0` | When set to 1–99, compute `expensive_threshold_pence` dynamically each price update as the Nth percentile of all available Agile rates. Makes the optimizer self-tuning as market prices shift. `0` = use the fixed value above. |
 | `min_charge_floor_pence` | `MIN_CHARGE_FLOOR_PENCE` | `10` | Minimum price threshold (p/kWh). Set to `0` to allow the threshold to drop to zero. Set negative to capture negative-price slots even when the battery is full. |
+| `min_discharge_soc` | `MIN_DISCHARGE_SOC` | `20` | Minimum battery SoC (%) before selling to the grid stops (`limitSoc` on the Sunsynk direction=0 product). Protects battery health. |
+
+### Carbon intensity (optional)
+
+If configured, the optimizer blends forecast carbon intensity (from the National Grid ESO Carbon Intensity API) into slot scoring so that lower-carbon cheap slots are preferred over higher-carbon ones of similar price.
+
+| Option | Env var | Default | Description |
+|---|---|---|---|
+| `carbon_intensity_weight` | `CARBON_INTENSITY_WEIGHT` | `0` | Weighting of carbon intensity in slot scoring (0 = disabled, 1 = full weight). A value of 0.1–0.3 is recommended to nudge towards cleaner slots without significantly affecting cost. |
+| `carbon_intensity_region_id` | `CARBON_INTENSITY_REGION_ID` | `0` | National Grid ESO region ID (0 = national average). See [carbonintensity.org.uk](https://api.carbonintensity.org.uk) for region IDs. |
 
 > **Note:** Passwords or API keys containing special characters (`#`, `&`, `!`) must be quoted in `.env`: `SUNSYNK_PASS="my#password"`
 
@@ -225,12 +237,20 @@ After each price update the following sensors are written to Home Assistant:
 | `sensor.sunsynk_optimizer_daily_saving_vs_peak` | p | Saving today vs buying all energy at peak-hour Agile price |
 | `sensor.sunsynk_optimizer_daily_saving_vs_standard` | p | Saving today vs buying at the configured standard tariff rate |
 | `sensor.sunsynk_optimizer_daily_pv_saving` | p | Saving today from solar reducing grid imports |
+| `sensor.sunsynk_optimizer_daily_export_income` | p | Export income earned today |
+| `sensor.sunsynk_optimizer_weekly_saving_vs_standard` | p | Saving this ISO week vs standard tariff |
+| `sensor.sunsynk_optimizer_weekly_export_income` | p | Export income earned this ISO week |
+| `sensor.sunsynk_optimizer_monthly_saving_vs_standard` | p | Saving this calendar month vs standard tariff |
+| `sensor.sunsynk_optimizer_monthly_export_income` | p | Export income earned this calendar month |
+| `sensor.sunsynk_optimizer_daily_co2_saved` | g | Estimated CO₂ saved today vs importing at peak (gCO₂) |
+| `sensor.sunsynk_optimizer_weekly_co2_saved` | g | Estimated CO₂ saved this ISO week (gCO₂) |
+| `sensor.sunsynk_optimizer_monthly_co2_saved` | g | Estimated CO₂ saved this calendar month (gCO₂) |
 | `sensor.sunsynk_optimizer_ev_load` | Wh | Estimated EV charge load to peak (only present when charging) |
 | `sensor.sunsynk_optimizer_export_rate` | p/kWh | Effective export rate in use (only present when configured) |
-| `sensor.sunsynk_optimizer_exportable_wh` | Wh | Energy available to sell to grid (only present when genuine surplus exists) |
-| `sensor.sunsynk_optimizer_sell_threshold` | p/kWh | Sell-to-grid threshold set on Sunsynk (only present when selling is active) |
-| `sensor.sunsynk_optimizer_export_slot_count` | — | Number of upcoming slots planned for battery export (only present when > 0) |
-| `sensor.sunsynk_optimizer_export_income` | p | Expected income from planned battery-to-grid sales (only present when > 0) |
+| `sensor.sunsynk_optimizer_exportable_wh` | Wh | Energy available to sell to grid |
+| `sensor.sunsynk_optimizer_sell_threshold` | p/kWh | Sell-to-grid threshold set on Sunsynk (0 when selling disabled) |
+| `sensor.sunsynk_optimizer_export_slot_count` | — | Number of upcoming slots planned for battery export |
+| `sensor.sunsynk_optimizer_export_income` | p | Expected income from planned battery-to-grid sales |
 | `sensor.sunsynk_optimizer_hp_adjustment` | Wh | Heat pump load adjustment vs historical (only present when configured) |
 | `sensor.sunsynk_optimizer_slot_profile` | Wh | Total daily consumption profile (only present when HA history available) |
 
@@ -326,6 +346,8 @@ src/
     homeassistant.ts        HA REST API client (sensors, notifications, slot profiles)
     heatpump.ts             Heat pump model: consumption vs temperature regression
     openmeteo.ts            Weather forecast fetcher (Open-Meteo, no API key needed)
+    savings.ts              Weekly/monthly savings history persistence
+    carbonintensity.ts      National Grid ESO carbon intensity forecast + slot weighting
     __tests__/
       calculator.test.ts    Unit tests for the core algorithm
       octopus.test.ts       Unit tests for export rate parsing

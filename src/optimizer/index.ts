@@ -11,6 +11,8 @@ import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
+import { loadSavingsHistory, updateSavingsHistory, SavingsHistory } from './savings';
+import { getCarbonIntensityForecast, applyCarbonWeighting, estimateCo2SavedGrams, CarbonSlot } from './carbonintensity';
 
 // ── Daily accumulator persistence ────────────────────────────────────────────
 
@@ -23,6 +25,7 @@ interface DailyAccumulators {
   savingVsStandardPence: number;
   pvSavingPence: number;
   exportIncomePence: number;
+  co2SavedGrams: number;
 }
 
 function loadAccumulators(today: string): DailyAccumulators {
@@ -36,7 +39,7 @@ function loadAccumulators(today: string): DailyAccumulators {
   } catch {
     // No file or parse error — start fresh
   }
-  return { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0 };
+  return { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0 };
 }
 
 function saveAccumulators(acc: DailyAccumulators): void {
@@ -86,8 +89,11 @@ async function main() {
 
   const plants = await client.getPlants();
   if (!plants.length) throw new Error('No plants found on Sunsynk account');
-  const plantId = plants[0].id;
-  console.log(`[optimizer] Using plant: ${plants[0].name ?? plantId} (id=${plantId})`);
+  const plant = config.sunsynkPlantId
+    ? plants.find(p => String(p.id) === config.sunsynkPlantId) ?? (() => { throw new Error(`Plant id=${config.sunsynkPlantId} not found on account (available: ${plants.map(p => p.id).join(', ')})`); })()
+    : plants[0];
+  const plantId = plant.id;
+  console.log(`[optimizer] Using plant: ${plant.name ?? plantId} (id=${plantId})`);
 
   // Cached values — refreshed at scheduled times
   // Pre-populate from disk cache so price updates work immediately on restart
@@ -102,6 +108,9 @@ async function main() {
   // Last values sent to Sunsynk — skip API call when unchanged
   let lastThreshold: number | null = null;
   let lastSellThreshold: number | null = null;
+
+  // Weekly / monthly savings history — persisted across restarts
+  let savingsHistory: SavingsHistory = loadSavingsHistory();
 
   // Forecast + consumption fetcher
   // useCache: skip Solcast API call if a fresh cache already exists (used on startup to avoid
@@ -290,18 +299,51 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    // Fetch carbon intensity — used for CO2 saving estimates and (optionally) slot scoring
+    let carbonSlots: CarbonSlot[] = [];
+    let carbonRates = rates;
+    try {
+      carbonSlots = await getCarbonIntensityForecast(config.carbonIntensityRegionId);
+      if (config.carbonIntensityWeight > 0) {
+        carbonRates = applyCarbonWeighting(rates, carbonSlots, config.carbonIntensityWeight);
+        console.log(`[optimizer] Carbon intensity weighting applied (weight=${config.carbonIntensityWeight}, regionId=${config.carbonIntensityRegionId}, ${carbonSlots.length} slots)`);
+      }
+    } catch (err) {
+      console.warn('[optimizer] Carbon intensity fetch failed — CO2 estimates unavailable this cycle:', err);
+    }
+
+    // Optionally compute expensive threshold from a percentile of current rates
+    let expensiveThresholdPence = config.expensiveThresholdPence;
+    const pct = config.expensiveThresholdPercentile;
+    if (pct > 0 && pct < 100 && rates.length > 0) {
+      const sorted = [...rates].map(r => r.value_inc_vat).sort((a, b) => a - b);
+      const idx = Math.floor((pct / 100) * sorted.length);
+      expensiveThresholdPence = Math.round(sorted[Math.min(idx, sorted.length - 1)]);
+      console.log(`[optimizer] Expensive threshold (p${pct}): ${expensiveThresholdPence}p/kWh`);
+    }
+
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
     if (today !== accumulators.date) {
-      accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0 };
+      accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0 };
     }
     accumulators.savingVsPeakPence     += result.savingVsPeakPence;
     accumulators.savingVsStandardPence += result.savingVsStandardPence;
     accumulators.pvSavingPence         += result.pvSavingPence;
     if (result.sellThreshold > 0) accumulators.exportIncomePence += result.exportIncomePence;
+    const co2SavedGrams = estimateCo2SavedGrams(rates, carbonSlots, expensiveThresholdPence, result.blocks, config.batteryFillRateWh);
+    accumulators.co2SavedGrams += co2SavedGrams;
     saveAccumulators(accumulators);
+
+    // Update weekly / monthly accumulators
+    savingsHistory = updateSavingsHistory(
+      savingsHistory,
+      result.savingVsStandardPence,
+      result.sellThreshold > 0 ? result.exportIncomePence : 0,
+      co2SavedGrams
+    );
 
     const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
     const effectiveSellThreshold = exportConfigured ? result.sellThreshold : undefined;
@@ -350,6 +392,13 @@ async function main() {
         ['daily_saving_vs_standard', ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` })],
         ['daily_pv_saving',          ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' })],
         ['daily_export_income',      ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' })],
+        ['weekly_saving_vs_standard', ha('sensor.sunsynk_optimizer_weekly_saving_vs_standard', Math.round(savingsHistory.weeklySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Weekly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.week})` })],
+        ['weekly_export_income',      ha('sensor.sunsynk_optimizer_weekly_export_income',      Math.round(savingsHistory.weeklyExportIncomePence),      { unit_of_measurement: 'p', friendly_name: `Weekly export income (${savingsHistory.week})` })],
+        ['monthly_saving_vs_standard', ha('sensor.sunsynk_optimizer_monthly_saving_vs_standard', Math.round(savingsHistory.monthlySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Monthly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.month})` })],
+        ['monthly_export_income',     ha('sensor.sunsynk_optimizer_monthly_export_income',     Math.round(savingsHistory.monthlyExportIncomePence),     { unit_of_measurement: 'p', friendly_name: `Monthly export income (${savingsHistory.month})` })],
+        ['daily_co2_saved',           ha('sensor.sunsynk_optimizer_daily_co2_saved',           accumulators.co2SavedGrams,                              { unit_of_measurement: 'g', friendly_name: 'Estimated CO₂ saved today (gCO₂)' })],
+        ['weekly_co2_saved',          ha('sensor.sunsynk_optimizer_weekly_co2_saved',          savingsHistory.weeklyCo2SavedGrams,                       { unit_of_measurement: 'g', friendly_name: `Estimated CO₂ saved this week (${savingsHistory.week}, gCO₂)` })],
+        ['monthly_co2_saved',         ha('sensor.sunsynk_optimizer_monthly_co2_saved',         savingsHistory.monthlyCo2SavedGrams,                      { unit_of_measurement: 'g', friendly_name: `Estimated CO₂ saved this month (${savingsHistory.month}, gCO₂)` })],
         ...(evLoadWh > 0 ? [['ev_load',        ha('sensor.sunsynk_optimizer_ev_load',        evLoadWh,               { unit_of_measurement: 'Wh',     friendly_name: 'Estimated EV charge load to peak' })] as [string, Promise<unknown>]] : []),
         ...(exportRatePence > 0 ? [['export_rate',   ha('sensor.sunsynk_optimizer_export_rate',   exportRatePence,        { unit_of_measurement: 'p/kWh',  friendly_name: 'Effective export rate' })] as [string, Promise<unknown>]] : []),
         ['exportable_wh',    ha('sensor.sunsynk_optimizer_exportable_wh',    result.exportableWh,    { unit_of_measurement: 'Wh',     friendly_name: 'Energy available to sell to grid' })],

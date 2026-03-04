@@ -32,6 +32,10 @@ export interface Config {
   octopusExportTariff: string;        // e.g. "E-1R-OUTGOING-AGILE-BB-23-02-28-G" (optional)
   batteryRoundTripEfficiency: number; // 0–1; fraction of imported Wh recoverable on discharge (default 0.9)
   minDischargeSoc: number;            // % — minimum battery SoC before selling stops (limitSoc on direction=0)
+  sunsynkPlantId: string;             // optional — target a specific plant ID; falls back to plants[0]
+  expensiveThresholdPercentile: number; // 0 = use fixed expensiveThresholdPence; 1–99 = compute dynamically
+  carbonIntensityWeight: number;        // 0 = disabled; 0.1–1 blends carbon intensity into slot scoring
+  carbonIntensityRegionId: number;      // National Grid ESO region ID (0 = national average)
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -71,6 +75,10 @@ function fromOptions(o: Record<string, unknown>): Config {
     octopusExportTariff: String(o['octopus_export_tariff'] ?? ''),
     batteryRoundTripEfficiency: Number(o['battery_round_trip_efficiency'] ?? 0.9),
     minDischargeSoc: Number(o['min_discharge_soc'] ?? 20),
+    sunsynkPlantId: String(o['sunsynk_plant_id'] ?? ''),
+    expensiveThresholdPercentile: Number(o['expensive_threshold_percentile'] ?? 0),
+    carbonIntensityWeight: Number(o['carbon_intensity_weight'] ?? 0),
+    carbonIntensityRegionId: Number(o['carbon_intensity_region_id'] ?? 0),
   };
 }
 
@@ -114,5 +122,9 @@ export function loadConfig(): Config {
     octopus_export_tariff: process.env.OCTOPUS_EXPORT_TARIFF,
     battery_round_trip_efficiency: process.env.BATTERY_ROUND_TRIP_EFFICIENCY,
     min_discharge_soc: process.env.MIN_DISCHARGE_SOC,
+    sunsynk_plant_id: process.env.SUNSYNK_PLANT_ID,
+    expensive_threshold_percentile: process.env.EXPENSIVE_THRESHOLD_PERCENTILE,
+    carbon_intensity_weight: process.env.CARBON_INTENSITY_WEIGHT,
+    carbon_intensity_region_id: process.env.CARBON_INTENSITY_REGION_ID,
   });
 }

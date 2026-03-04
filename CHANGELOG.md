@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Daily accumulators persisted to `daily_accumulators.json` — restored on startup so mid-day restarts no longer wipe HA daily saving sensors (closes #14)
+- Weekly and monthly savings accumulators persisted to `savings_history.json`; exposed as `sensor.sunsynk_optimizer_weekly/monthly_saving_vs_standard` and `weekly/monthly_export_income` (closes #19)
+- Configurable plant ID via `sunsynk_plant_id` / `SUNSYNK_PLANT_ID` — targets a specific Sunsynk plant by ID; falls back to `plants[0]` (closes #18)
+- Optional `expensive_threshold_percentile` config — computes `expensiveThresholdPence` dynamically each price update as the Nth percentile of all available Agile rates (closes #21)
+- Carbon intensity integration — optional `carbon_intensity_weight` and `carbon_intensity_region_id` config; fetches National Grid ESO forecasts and blends carbon intensity into import slot scoring (closes #22)
+- CO₂ saving sensors: `sensor.sunsynk_optimizer_daily/weekly/monthly_co2_saved` (gCO₂) — estimated carbon saved by shifting energy from expensive high-carbon peak slots to cheap lower-carbon slots. Carbon intensity is always fetched (free API, no auth) regardless of whether weighting is enabled.
+
+### Changed
+- HA sensor writes now use `Promise.allSettled` — individual failures are logged by sensor name and do not suppress other writes (closes #16)
+- `sell_threshold`, `exportable_wh`, `export_slot_count`, and `export_income` sensors are now written unconditionally every price update (0 when export is inactive), preventing stale values in HA (closes #17)
+- `setMinCharge` is skipped when both threshold and sell threshold are unchanged from the previous run, reducing unnecessary Sunsynk API calls (closes #15)
+
 ## [1.1.0] - 2026-03-04
 
 ### Added
