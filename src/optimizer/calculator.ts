@@ -170,22 +170,35 @@ export function calculate(
   const blocks = importCandidates.length === 0
     ? 0
     : Math.ceil(opportunisticFillWh / (config.batteryFillRateWh * eff));
-  const hasNegativeSlots = importCandidates.some(r => r.value_inc_vat < 0);
+
+  // Negative slot handling: always charge at negative slots the battery can absorb,
+  // preferring the cheapest (most negative) first so we don't waste capacity on -1p
+  // when -10p is available. When the battery is already full, include all negative slots
+  // anyway — the BMS prevents over-charge and any remaining headroom will be used.
+  const negativeSlots = importCandidates.filter(r => r.value_inc_vat < 0);
+  const maxAbsorbBlocks = Math.ceil(maxAbsorbWh / (config.batteryFillRateWh * eff));
+  const negativeBlocksToCharge = maxAbsorbBlocks > 0
+    ? Math.min(negativeSlots.length, maxAbsorbBlocks)
+    : negativeSlots.length;
+  const blocksToUse = Math.max(blocks, negativeBlocksToCharge);
 
   let threshold: number;
-  if (blocks < 1 && !hasNegativeSlots) {
-    threshold = config.minChargeFloorPence;
-  } else if (!importCandidates.length) {
+  if (blocksToUse < 1 || !importCandidates.length) {
     threshold = config.minChargeFloorPence;
   } else {
-    const blocksToUse = hasNegativeSlots && blocks < 1 ? 1 : blocks;
     const idx = Math.min(blocksToUse - 1, importCandidates.length - 1);
-    threshold = Math.max(Math.ceil(importCandidates[idx].value_inc_vat), config.minChargeFloorPence);
+    const rawValue = importCandidates[idx].value_inc_vat;
+    const rawThreshold = Math.ceil(rawValue) || 0; // normalise -0 → 0
+    // Don't apply the positive floor when the target slot is itself negative — that would
+    // widen the threshold to include cheap positive slots we deliberately excluded.
+    threshold = rawValue < 0
+      ? rawThreshold
+      : Math.max(rawThreshold, config.minChargeFloorPence);
   }
 
   // ── 7. Cost savings ───────────────────────────────────────────────────────
-  const purchasedSlots    = blocks > 0 ? importCandidates.slice(0, blocks) : [];
-  const energyPurchasedWh = blocks > 0 ? Math.min(blocks, importCandidates.length) * config.batteryFillRateWh : 0;
+  const purchasedSlots    = blocksToUse > 0 ? importCandidates.slice(0, blocksToUse) : [];
+  const energyPurchasedWh = blocksToUse > 0 ? Math.min(blocksToUse, importCandidates.length) * config.batteryFillRateWh : 0;
   const energyPurchasedKwh = energyPurchasedWh / 1000;
 
   const actualCostPence = purchasedSlots.reduce(
@@ -253,7 +266,7 @@ export function calculate(
     `batteryToFill=${batteryToFill.toFixed(0)} Wh, ` +
     `pvTotal=${pvTotal.toFixed(0)} Wh (p50=${pvTotalP50.toFixed(0)}, adj=${confidenceAdj}%), ` +
     `houseUsage=${houseUsage.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh, ` +
-    `blocks=${blocks}, threshold=${threshold}p, eff=${(eff * 100).toFixed(0)}%` +
+    `blocks=${blocksToUse}, threshold=${threshold}p, eff=${(eff * 100).toFixed(0)}%` +
     (exportRatePence > 0 ? `, exportRate=${exportRatePence}p (break-even=${(exportRatePence * eff).toFixed(1)}p, ${importCandidates.length} import candidates)` : '') +
     (sellThreshold > 0 ? `, sell=${sellThreshold}p (exportable=${exportableWh} Wh, ${exportSlotCount} slot(s), income=${exportIncomePence.toFixed(1)}p)` : '')
   );
@@ -268,7 +281,7 @@ export function calculate(
     batteryToFill: Math.floor(batteryToFill),
     batteryToFillNoPV: Math.floor(batteryToFillNoPV),
     surplus: Math.floor(surplus),
-    blocks,
+    blocks: blocksToUse,
     results: windowRates,
     energyPurchasedWh,
     actualCostPence: Math.round(actualCostPence * 10) / 10,

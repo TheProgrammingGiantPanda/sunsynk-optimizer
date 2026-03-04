@@ -136,10 +136,10 @@ describe('calculate — core behaviour', () => {
   });
 
   it('always includes a negative-price cheap slot when battery is full', () => {
-    const config = { ...BASE_CONFIG, minChargeFloorPence: -20 };
     const ratesWithNegative = [priceSlot(0, -5), ...RATES.slice(1)];
     // battery=100% (full): maxAbsorb=0, blocks=0, but -5p slot → threshold=-5 (free money)
-    const result = calculate(config, 100, [], ratesWithNegative);
+    // minChargeFloorPence=0 must NOT override the negative threshold
+    const result = calculate(BASE_CONFIG, 100, [], ratesWithNegative);
     expect(result.threshold).toBe(-5);
   });
 
@@ -380,5 +380,70 @@ describe('calculate — horizon behaviour', () => {
     expect(result.expensiveSlots).toBe(0);
     expect(result.totalExpensiveDemandWh).toBe(0);
     expect(result.blocks).toBe(4);   // fill 10000 Wh; all slots now cheap candidates
+  });
+});
+
+// ── Negative price slot handling ─────────────────────────────────────────────
+
+describe('calculate — negative price slot handling', () => {
+
+  // Replace the two cheapest RATES slots (10p, 11p) with negative ones
+  const ratesWithTwoNegative = [priceSlot(0, -10), priceSlot(0.5, -1), ...RATES.slice(2)];
+
+  it('charges at all negative slots when battery has space for all', () => {
+    // battery=50% (5000 Wh free = 2 blocks); 2 negative slots (-10p, -1p)
+    // Both fit → threshold = -1p (least negative, covers both)
+    const result = calculate(BASE_CONFIG, 50, [], ratesWithTwoNegative);
+    expect(result.threshold).toBe(-1);
+    expect(result.blocks).toBe(2);
+  });
+
+  it('prefers cheapest negative slots when battery space is limited', () => {
+    // battery=90% (1000 Wh free = 1 block); 2 negatives (-10p, -1p)
+    // Only 1 slot of headroom → prefer -10p; threshold = -10p so Sunsynk skips -1p
+    const result = calculate(BASE_CONFIG, 90, [], ratesWithTwoNegative);
+    expect(result.threshold).toBe(-10);
+    expect(result.blocks).toBe(1);
+  });
+
+  it('includes all negative slots when battery is full (BMS prevents over-charge)', () => {
+    // battery=100%, 2 negatives (-10p, -1p); threshold = -1p (covers both)
+    // minChargeFloorPence=0 must NOT override the negative threshold
+    const result = calculate(BASE_CONFIG, 100, [], ratesWithTwoNegative);
+    expect(result.threshold).toBe(-1);
+    expect(result.blocks).toBe(2);
+  });
+
+  it('negative threshold is not overridden by positive minChargeFloorPence', () => {
+    // Even with a high floor (10p), a -5p threshold must stay -5p
+    const config = { ...BASE_CONFIG, minChargeFloorPence: 10 };
+    const rates = [priceSlot(0, -5), ...RATES.slice(1)];
+    const result = calculate(config, 100, [], rates);
+    expect(result.threshold).toBe(-5);
+  });
+
+  it('negative blocks combine with positive opportunistic blocks', () => {
+    // battery=0% (10000 Wh free = 4 blocks opportunistic fill)
+    // 2 negatives (-10p, -1p) + positive cheap slots (12p, 13p, ...)
+    // negativeBlocksToCharge=2, blocks=4 → blocksToUse=max(4,2)=4
+    // threshold = 4th cheapest = 13p (the algorithm still buys the 4 cheapest including negatives)
+    const result = calculate(BASE_CONFIG, 0, [], ratesWithTwoNegative);
+    expect(result.blocks).toBe(4);
+    expect(result.threshold).toBe(13); // 4th cheapest of [-10, -1, 12, 13, ...]
+  });
+
+  it('actualCostPence is negative when charging at negative prices (grid pays us)', () => {
+    // battery=50% (2 blocks free); 2 negative slots (-10p, -1p)
+    // cost = (-10 + -1) × (2500/1000) = -11 × 2.5 = -27.5p
+    const result = calculate(BASE_CONFIG, 50, [], ratesWithTwoNegative);
+    expect(result.actualCostPence).toBeCloseTo(-27.5, 1);
+  });
+
+  it('fractional negative price (-0.3p) is not overridden by positive minChargeFloorPence', () => {
+    // Math.ceil(-0.3) = 0; rawValue < 0 so we must NOT apply minChargeFloorPence=10
+    const config = { ...BASE_CONFIG, minChargeFloorPence: 10 };
+    const rates = [priceSlot(0, -0.3), ...RATES.slice(1)];
+    const result = calculate(config, 100, [], rates);
+    expect(result.threshold).toBe(0); // ceil(-0.3)=0, not 10
   });
 });
