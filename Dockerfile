@@ -6,12 +6,11 @@ RUN apk add --no-cache nodejs npm
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package*.json tsconfig.json ./
+COPY src/ ./src/
+
 # Install all deps (including devDeps) so TypeScript is available for the build
 RUN npm ci
-
-COPY tsconfig.json ./
-COPY src/ ./src/
 
 RUN npm run build
 
