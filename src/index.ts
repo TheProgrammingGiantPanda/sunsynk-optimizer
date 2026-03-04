@@ -12,6 +12,8 @@ export default class SunsyncClient {
   token: string | null;
   axios: AxiosInstance;
   getPublicKeyPath: string;
+  private _username: string | null = null;
+  private _password: string | null = null;
 
   constructor(options: ClientOptions = {}) {
     this.baseUrl = options.baseUrl || 'https://api.sunsynk.net';
@@ -19,6 +21,23 @@ export default class SunsyncClient {
     this.getPublicKeyPath = '/anonymous/publicKey';
     this.token = null;
     this.axios = axios.create({ baseURL: this.baseUrl, timeout: 10000 });
+
+    // Re-authenticate automatically on 401 — token may have expired after a long run.
+    // Sets _retry on the original config to prevent infinite loops.
+    this.axios.interceptors.response.use(
+      res => res,
+      async (err) => {
+        const original = err.config;
+        if (err.response?.status === 401 && !original._retry && this._username && this._password) {
+          original._retry = true;
+          console.log('[client] Token expired (401) — re-authenticating…');
+          const newToken = await this.login(this._username, this._password);
+          original.headers['Authorization'] = `Bearer ${newToken}`;
+          return this.axios(original);
+        }
+        throw err;
+      }
+    );
   }
 
   private _authHeaders(token?: string) {
@@ -90,6 +109,8 @@ export default class SunsyncClient {
         );
       }
       this.token = token;
+      this._username = username;
+      this._password = password;
       return token;
     } catch (err: any) {
       if (err.response) {

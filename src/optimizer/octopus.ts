@@ -1,5 +1,44 @@
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { withRetry } from './retry';
+
+// ── Disk cache ────────────────────────────────────────────────────────────────
+
+const DATA_DIR = fs.existsSync('/data') ? '/data' : process.cwd();
+const IMPORT_CACHE_PATH = path.join(DATA_DIR, 'agile_rates_cache.json');
+const EXPORT_CACHE_PATH = path.join(DATA_DIR, 'agile_export_cache.json');
+
+interface RatesCache {
+  fetchedAt: string;
+  rates: PriceSlot[];
+}
+
+function saveRatesCache(rates: PriceSlot[], cachePath: string): void {
+  try {
+    fs.writeFileSync(cachePath, JSON.stringify({ fetchedAt: new Date().toISOString(), rates }), 'utf-8');
+  } catch (err: any) {
+    console.warn(`[octopus] Failed to write rates cache: ${err?.message ?? err}`);
+  }
+}
+
+function loadRatesCache(cachePath: string, label: string): PriceSlot[] | null {
+  try {
+    if (!fs.existsSync(cachePath)) return null;
+    const cache: RatesCache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    const now = new Date();
+    const futureSlots = cache.rates.filter(r => new Date(r.valid_to) > now);
+    if (futureSlots.length === 0) {
+      console.warn(`[octopus] Cached ${label} are fully expired — no future slots`);
+      return null;
+    }
+    const ageMin = Math.round((Date.now() - new Date(cache.fetchedAt).getTime()) / 60000);
+    console.warn(`[octopus] Live ${label} fetch failed — using cache from ${cache.fetchedAt} (${ageMin} min ago, ${futureSlots.length} future slots)`);
+    return cache.rates;
+  } catch {
+    return null;
+  }
+}
 
 export interface PriceSlot {
   value_exc_vat: number;
@@ -42,11 +81,19 @@ export async function getAgileRates(
   tariff: string
 ): Promise<PriceSlot[]> {
   const url = `https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`;
-  return withRetry(
-    () => axios.get(url, { params: { page_size: 192 }, headers: { Accept: 'application/json' }, timeout: 15000 })
-      .then(res => res.data?.results ?? []),
-    { label: 'Octopus Agile rates' }
-  );
+  try {
+    const rates = await withRetry(
+      () => axios.get(url, { params: { page_size: 192 }, headers: { Accept: 'application/json' }, timeout: 15000 })
+        .then(res => res.data?.results ?? []),
+      { label: 'Octopus Agile rates' }
+    );
+    saveRatesCache(rates, IMPORT_CACHE_PATH);
+    return rates;
+  } catch (err) {
+    const cached = loadRatesCache(IMPORT_CACHE_PATH, 'import rates');
+    if (cached) return cached;
+    throw err;
+  }
 }
 
 /**
@@ -59,13 +106,15 @@ export async function getOutgoingAgileRates(
 ): Promise<PriceSlot[]> {
   const url = `https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`;
   try {
-    return await withRetry(
+    const rates = await withRetry(
       () => axios.get(url, { params: { page_size: 192 }, headers: { Accept: 'application/json' }, timeout: 15000 })
         .then(res => res.data?.results ?? []),
       { label: 'Outgoing Agile export rates' }
     );
+    saveRatesCache(rates, EXPORT_CACHE_PATH);
+    return rates;
   } catch {
-    return [];
+    return loadRatesCache(EXPORT_CACHE_PATH, 'export rates') ?? [];
   }
 }
 
