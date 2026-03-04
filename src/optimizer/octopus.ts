@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { withRetry } from './retry';
 
 export interface PriceSlot {
   value_exc_vat: number;
@@ -13,10 +14,9 @@ export async function getAgileRates(
   tariff: string
 ): Promise<PriceSlot[]> {
   const url = `https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`;
-  const res = await axios.get(url, {
-    params: { page_size: 192 },
-    headers: { Accept: 'application/json' },
-    timeout: 15000,
-  });
-  return res.data?.results ?? [];
+  return withRetry(
+    () => axios.get(url, { params: { page_size: 192 }, headers: { Accept: 'application/json' }, timeout: 15000 })
+      .then(res => res.data?.results ?? []),
+    { label: 'Octopus Agile rates' }
+  );
 }

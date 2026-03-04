@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { withRetry } from './retry';
 
 export interface HourlyTemperature {
   time: Date;
@@ -10,21 +11,17 @@ export interface HourlyTemperature {
  * Returns the next 48 hours of hourly temperatures.
  */
 export async function getHourlyForecast(lat: number, lon: number): Promise<HourlyTemperature[]> {
-  const res = await axios.get('https://api.open-meteo.com/v1/forecast', {
-    params: {
-      latitude: lat,
-      longitude: lon,
-      hourly: 'temperature_2m',
-      forecast_days: 2,
-      timezone: 'UTC',
-    },
-    timeout: 10000,
-  });
-
-  const times: string[] = res.data.hourly.time;
-  const temps: number[] = res.data.hourly.temperature_2m;
-
-  return times.map((t, i) => ({ time: new Date(t + ':00Z'), tempC: temps[i] }));
+  return withRetry(
+    () => axios.get('https://api.open-meteo.com/v1/forecast', {
+      params: { latitude: lat, longitude: lon, hourly: 'temperature_2m', forecast_days: 2, timezone: 'UTC' },
+      timeout: 10000,
+    }).then(res => {
+      const times: string[] = res.data.hourly.time;
+      const temps: number[] = res.data.hourly.temperature_2m;
+      return times.map((t, i) => ({ time: new Date(t + ':00Z'), tempC: temps[i] }));
+    }),
+    { label: 'Open-Meteo forecast' }
+  );
 }
 
 /**

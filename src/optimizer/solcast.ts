@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { withRetry } from './retry';
 
 export interface ForecastSlot {
   period_end: string;   // ISO 8601 UTC datetime
@@ -10,16 +11,15 @@ export interface ForecastSlot {
 
 export async function getSolarForecast(siteId: string, apiKey: string): Promise<ForecastSlot[]> {
   const url = `https://api.solcast.com.au/rooftop_sites/${siteId}/forecasts`;
-  const res = await axios.get(url, {
-    params: { format: 'json' },
-    headers: {
-      Accept: 'application/json',
-      // Solcast Basic auth: API key as username, empty password
-      Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-    },
-    timeout: 15000,
-  });
-  return res.data?.forecasts ?? [];
+  const auth = `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`;
+  return withRetry(
+    () => axios.get(url, {
+      params: { format: 'json' },
+      headers: { Accept: 'application/json', Authorization: auth },
+      timeout: 15000,
+    }).then(res => res.data?.forecasts ?? []),
+    { label: `Solcast site ${siteId}` }
+  );
 }
 
 /**

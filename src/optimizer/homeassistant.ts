@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { withRetry } from './retry';
 
 function haClient(haUrl: string, haToken: string) {
   return axios.create({
@@ -16,7 +17,10 @@ export async function getEntityState(
   haToken: string,
   entityId: string
 ): Promise<number> {
-  const res = await haClient(haUrl, haToken).get(`/states/${entityId}`);
+  const res = await withRetry(
+    () => haClient(haUrl, haToken).get(`/states/${entityId}`),
+    { label: `HA getEntityState ${entityId}` }
+  );
   const val = parseFloat(res.data?.state);
   if (isNaN(val)) {
     throw new Error(
@@ -58,9 +62,12 @@ export async function getAvgConsumptionWh(
   const start = new Date();
   start.setDate(start.getDate() - (days + 1)); // +1 to ensure we get enough complete days
 
-  const res = await haClient(haUrl, haToken).get(
-    `/history/period/${start.toISOString()}`,
-    { params: { filter_entity_id: entityId, end_time: new Date().toISOString() }, timeout: 30000 }
+  const res = await withRetry(
+    () => haClient(haUrl, haToken).get(
+      `/history/period/${start.toISOString()}`,
+      { params: { filter_entity_id: entityId, end_time: new Date().toISOString() }, timeout: 30000 }
+    ),
+    { label: `HA history ${entityId}`, baseDelayMs: 2000 }
   );
 
   const states: any[] = res.data?.[0] ?? [];
@@ -112,9 +119,12 @@ export async function getSlotProfileWh(
   const start = new Date();
   start.setDate(start.getDate() - (days + 1));
 
-  const res = await haClient(haUrl, haToken).get(
-    `/history/period/${start.toISOString()}`,
-    { params: { filter_entity_id: entityId, end_time: new Date().toISOString() }, timeout: 30000 }
+  const res = await withRetry(
+    () => haClient(haUrl, haToken).get(
+      `/history/period/${start.toISOString()}`,
+      { params: { filter_entity_id: entityId, end_time: new Date().toISOString() }, timeout: 30000 }
+    ),
+    { label: `HA history ${entityId}`, baseDelayMs: 2000 }
   );
 
   const states: any[] = res.data?.[0] ?? [];
