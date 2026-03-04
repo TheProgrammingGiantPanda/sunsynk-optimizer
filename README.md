@@ -175,7 +175,7 @@ If configured, the optimizer blends forecast carbon intensity (from the National
 | Option | Env var | Default | Description |
 |---|---|---|---|
 | `carbon_intensity_weight` | `CARBON_INTENSITY_WEIGHT` | `0` | Weighting of carbon intensity in slot scoring (0 = disabled, 1 = full weight). A value of 0.1–0.3 is recommended to nudge towards cleaner slots without significantly affecting cost. |
-| `carbon_intensity_region_id` | `CARBON_INTENSITY_REGION_ID` | `0` | National Grid ESO region ID (0 = national average). See [carbonintensity.org.uk](https://api.carbonintensity.org.uk) for region IDs. |
+| `carbon_intensity_region_id` | `CARBON_INTENSITY_REGION_ID` | `0` | National Grid ESO region ID (0 = national average). Region IDs: 1=North Scotland, 2=South Scotland, 3=NW England, 4=NE England, 5=Yorkshire, 6=N Wales & Merseyside, 7=South Wales, 8=West Midlands, 9=East Midlands, 10=East England, 11=South West England, 12=South England, 13=London, 14=South East England. |
 
 > **Note:** Passwords or API keys containing special characters (`#`, `&`, `!`) must be quoted in `.env`: `SUNSYNK_PASS="my#password"`
 
