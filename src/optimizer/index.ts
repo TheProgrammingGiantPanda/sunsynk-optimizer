@@ -4,7 +4,7 @@ import { getSolarForecast, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleInterval } from './scheduler';
-import { getEntityState, setState } from './homeassistant';
+import { getEntityState, setState, getAvgConsumptionWh } from './homeassistant';
 
 async function main() {
   const config = loadConfig();
@@ -34,11 +34,12 @@ async function main() {
   const plantId = plants[0].id;
   console.log(`[optimizer] Using plant: ${plants[0].name ?? plantId} (id=${plantId})`);
 
-  // Cached forecasts — refreshed at scheduled times
+  // Cached values — refreshed at scheduled times
   let pv1Forecasts: ForecastSlot[] = [];
   let pv2Forecasts: ForecastSlot[] = [];
+  let avgConsumptionWh = config.avgConsumptionWh;
 
-  // Forecast fetcher
+  // Forecast + consumption fetcher
   const fetchForecasts = async () => {
     console.log('[optimizer] Fetching solar forecasts from Solcast…');
     try {
@@ -51,6 +52,21 @@ async function main() {
       );
     } catch (err) {
       console.error('[optimizer] Forecast fetch failed:', err);
+    }
+
+    try {
+      const calculated = await getAvgConsumptionWh(
+        config.haUrl, config.haToken,
+        config.haLoadDailyEntity,
+        config.consumptionAverageDays
+      );
+      if (calculated !== null) {
+        avgConsumptionWh = calculated;
+      } else {
+        console.warn(`[optimizer] Not enough consumption history — using config fallback: ${avgConsumptionWh} Wh/slot`);
+      }
+    } catch (err) {
+      console.error('[optimizer] Failed to calculate avg consumption:', err);
     }
   };
 
@@ -95,7 +111,7 @@ async function main() {
       return;
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, avgConsumptionWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates);
 
     try {
       await client.setMinCharge(plantId, result.threshold);

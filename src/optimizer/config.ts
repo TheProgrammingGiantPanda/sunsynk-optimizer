@@ -10,6 +10,8 @@ export interface Config {
   haBatteryVoltageEntity: string;
   haBatteryMaxCurrentEntity: string;
   haBatteryCapacityAhEntity: string;
+  haLoadDailyEntity: string;
+  consumptionAverageDays: number;
   solcastApiKey: string;
   solcastSitePv1: string;
   solcastSitePv2: string;
@@ -34,6 +36,8 @@ function fromOptions(o: Record<string, unknown>): Config {
     haBatteryVoltageEntity: String(o['ha_battery_voltage_entity'] ?? 'sensor.solarsynkv3_2310140043_battery_voltage'),
     haBatteryMaxCurrentEntity: String(o['ha_battery_max_current_entity'] ?? 'sensor.solarsynkv3_2310140043_batterymaxcurrentcharge'),
     haBatteryCapacityAhEntity: String(o['ha_battery_capacity_ah_entity'] ?? 'sensor.solarsynkv3_2310140043_battery_capacity'),
+    haLoadDailyEntity: String(o['ha_load_daily_entity'] ?? 'sensor.solarsynkv3_2310140043_load_daily_used'),
+    consumptionAverageDays: Number(o['consumption_average_days'] ?? 7),
     solcastApiKey: String(o['solcast_api_key'] ?? ''),
     solcastSitePv1: String(o['solcast_site_pv1'] ?? ''),
     solcastSitePv2: String(o['solcast_site_pv2'] ?? ''),
@@ -69,6 +73,8 @@ export function loadConfig(): Config {
     ha_battery_voltage_entity: process.env.HA_BATTERY_VOLTAGE_ENTITY,
     ha_battery_max_current_entity: process.env.HA_BATTERY_MAX_CURRENT_ENTITY,
     ha_battery_capacity_ah_entity: process.env.HA_BATTERY_CAPACITY_AH_ENTITY,
+    ha_load_daily_entity: process.env.HA_LOAD_DAILY_ENTITY,
+    consumption_average_days: process.env.CONSUMPTION_AVERAGE_DAYS,
     solcast_api_key: process.env.SOLCAST_API_KEY,
     solcast_site_pv1: process.env.SOLCAST_SITE_PV1,
     solcast_site_pv2: process.env.SOLCAST_SITE_PV2,

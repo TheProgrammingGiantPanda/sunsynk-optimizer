@@ -21,6 +21,8 @@ options:
   ha_battery_voltage_entity: "sensor.solarsynkv3_2310140043_battery_voltage"
   ha_battery_max_current_entity: "sensor.solarsynkv3_2310140043_batterymaxcurrentcharge"
   ha_battery_capacity_ah_entity: "sensor.solarsynkv3_2310140043_battery_capacity"
+  ha_load_daily_entity: "sensor.solarsynkv3_2310140043_load_daily_used"
+  consumption_average_days: 7
   solcast_api_key: ""
   solcast_site_pv1: ""
   solcast_site_pv2: ""
@@ -42,6 +44,8 @@ schema:
   ha_battery_voltage_entity: str
   ha_battery_max_current_entity: str
   ha_battery_capacity_ah_entity: str
+  ha_load_daily_entity: str
+  consumption_average_days: int
   solcast_api_key: password
   solcast_site_pv1: str
   solcast_site_pv2: str
