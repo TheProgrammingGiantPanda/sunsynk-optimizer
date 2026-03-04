@@ -193,6 +193,33 @@ export async function getSlotProfileWh(
   return profile;
 }
 
+const NOTIFICATION_ID = 'sunsynk_optimizer';
+
+/**
+ * Creates (or replaces) a persistent notification on the HA dashboard.
+ */
+export async function createNotification(
+  haUrl: string,
+  haToken: string,
+  title: string,
+  message: string
+): Promise<void> {
+  await haClient(haUrl, haToken).post('/services/persistent_notification/create', {
+    notification_id: NOTIFICATION_ID,
+    title,
+    message,
+  });
+}
+
+/**
+ * Dismisses the optimizer persistent notification (called on next successful run).
+ */
+export async function dismissNotification(haUrl: string, haToken: string): Promise<void> {
+  await haClient(haUrl, haToken).post('/services/persistent_notification/dismiss', {
+    notification_id: NOTIFICATION_ID,
+  });
+}
+
 /**
  * Lists all entity IDs matching a search string — useful for discovering sensor names.
  */

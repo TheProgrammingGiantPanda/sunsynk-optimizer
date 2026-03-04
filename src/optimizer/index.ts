@@ -4,7 +4,7 @@ import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
-import { getEntityState, setState, getSlotProfileWh } from './homeassistant';
+import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 
@@ -104,6 +104,10 @@ async function main() {
       batteryPct = await getEntityState(config.haUrl, config.haToken, config.haBatterySocEntity);
     } catch (err) {
       console.error('[optimizer] Failed to get battery SOC from HA:', err);
+      createNotification(config.haUrl, config.haToken,
+        'Sunsynk Optimizer — battery SOC unavailable',
+        `Failed to read battery state-of-charge from HA at ${new Date().toISOString()}.\n\n${err}`
+      ).catch(() => {});
       return;
     }
 
@@ -174,8 +178,13 @@ async function main() {
         `[${new Date().toISOString()}] Set min charge threshold to ${result.threshold}p ` +
         `(battery ${batteryPct}%)`
       );
+      dismissNotification(config.haUrl, config.haToken).catch(() => {});
     } catch (err) {
       console.error('[optimizer] Failed to set min charge:', err);
+      createNotification(config.haUrl, config.haToken,
+        'Sunsynk Optimizer — failed to set charge threshold',
+        `Failed to set min charge threshold at ${new Date().toISOString()}.\n\n${err}`
+      ).catch(() => {});
     }
 
     // Push results to HA sensors
