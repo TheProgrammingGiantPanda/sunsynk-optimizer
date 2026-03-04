@@ -1,6 +1,6 @@
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
-import { getMergedForecast, ForecastSlot } from './solcast';
+import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
@@ -49,7 +49,8 @@ async function main() {
   console.log(`[optimizer] Using plant: ${plants[0].name ?? plantId} (id=${plantId})`);
 
   // Cached values — refreshed at scheduled times
-  let pvForecasts: ForecastSlot[] = [];
+  // Pre-populate from disk cache so price updates work immediately on restart
+  let pvForecasts: ForecastSlot[] = loadForecastCache() ?? [];
   let slotProfile: number[] | undefined;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
