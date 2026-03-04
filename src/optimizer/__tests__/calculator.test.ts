@@ -33,6 +33,10 @@ const BASE_CONFIG: Config = {
   haOutdoorTempEntity: '',
   standardTariffPence: 24,
   haEvChargerEntity: '',
+  exportTariffSchedule: '',
+  octopusExportProduct: '',
+  octopusExportTariff: '',
+  batteryRoundTripEfficiency: 1.0,  // 100% efficiency in tests for predictable arithmetic
 };
 
 /** Build a 30-min price slot starting offsetHours after NOW */
@@ -166,5 +170,53 @@ describe('calculate', () => {
     const config = { ...BASE_CONFIG, peakHour: 6 };
     const result = calculate(config, 0, [], RATES);
     expect(result.blocks).toBeGreaterThan(0);
+  });
+
+  it('returns exportRatePence in the result', () => {
+    const result = calculate(BASE_CONFIG, 50, [], RATES, undefined, undefined, 0, 12);
+    expect(result.exportRatePence).toBe(12);
+  });
+
+  it('filters out import slots above the export rate', () => {
+    // Export rate = 12p; RATES slots 0–1–2 are 10p,11p,12p; only 10p and 11p are strictly below 12p
+    // Without export filter: 5000 Wh / 2500 = 2 blocks → threshold = 11p
+    // With export rate 12p: same 2 blocks still fit in [10p, 11p] → threshold = 11p
+    const without = calculate(BASE_CONFIG, 50, [], RATES);
+    const withExport = calculate(BASE_CONFIG, 50, [], RATES, undefined, undefined, 0, 12);
+    expect(without.blocks).toBe(2);
+    expect(withExport.blocks).toBe(2);
+    // threshold should not exceed the export rate
+    expect(withExport.threshold).toBeLessThan(12);
+  });
+
+  it('caps blocks when fewer import candidates are available than needed', () => {
+    // Export rate = 10.5p → only the 10p slot qualifies; battery empty needs 4 blocks but only 1 available
+    const result = calculate(BASE_CONFIG, 0, [], RATES, undefined, undefined, 0, 10.5);
+    // Only 1 candidate slot (10p); threshold = 10p; energyPurchasedWh = 1 × 2500
+    expect(result.threshold).toBe(10);
+    expect(result.energyPurchasedWh).toBe(2500);
+  });
+
+  it('exportRatePence defaults to zero (no filtering)', () => {
+    const result = calculate(BASE_CONFIG, 50, [], RATES);
+    expect(result.exportRatePence).toBe(0);
+  });
+
+  it('efficiency increases blocks needed to fill the battery', () => {
+    // With 100% efficiency: 5000 Wh / 2500 = 2 blocks
+    // With 80% efficiency: 5000 / (2500 * 0.8) = 5000 / 2000 = 2.5 → ceil = 3 blocks
+    const config90 = { ...BASE_CONFIG, batteryRoundTripEfficiency: 0.8 };
+    const result100 = calculate(BASE_CONFIG, 50, [], RATES);   // eff=1.0
+    const result80  = calculate(config90,    50, [], RATES);
+    expect(result100.blocks).toBe(2);
+    expect(result80.blocks).toBe(3);
+  });
+
+  it('efficiency shifts the export rate break-even down', () => {
+    // Export rate = 15p, eff = 0.8 → break-even = 12p; slots at 10p, 11p qualify; 12p does not
+    const config = { ...BASE_CONFIG, batteryRoundTripEfficiency: 0.8 };
+    const result = calculate(config, 50, [], RATES, undefined, undefined, 0, 15);
+    // threshold must be below the break-even (15 * 0.8 = 12p)
+    expect(result.threshold).toBeLessThan(12);
   });
 });

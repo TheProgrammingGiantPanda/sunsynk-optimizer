@@ -38,6 +38,10 @@ options:
   ha_outdoor_temp_entity: "sensor.main_heat_pump_outdoor_temperature"
   standard_tariff_pence: 24
   ha_ev_charger_entity: "sensor.go2_andi_charge_power"
+  export_tariff_schedule: "15:2024-01-01"
+  octopus_export_product: ""
+  octopus_export_tariff: ""
+  battery_round_trip_efficiency: 0.9
 schema:
   sunsynk_username: str
   sunsynk_password: password
@@ -64,3 +68,7 @@ schema:
   ha_outdoor_temp_entity: str
   standard_tariff_pence: float
   ha_ev_charger_entity: str
+  export_tariff_schedule: str
+  octopus_export_product: str
+  octopus_export_tariff: str
+  battery_round_trip_efficiency: float

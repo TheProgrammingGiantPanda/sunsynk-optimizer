@@ -1,7 +1,7 @@
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
 import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
-import { getAgileRates } from './octopus';
+import { getAgileRates, getFixedExportRate, getOutgoingAgileRate } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
@@ -155,6 +155,24 @@ async function main() {
       return;
     }
 
+    // Resolve effective export rate: Outgoing Agile > fixed schedule > 0
+    let exportRatePence = 0;
+    if (config.octopusExportProduct && config.octopusExportTariff) {
+      const agileExport = await getOutgoingAgileRate(config.octopusExportProduct, config.octopusExportTariff);
+      if (agileExport !== null) {
+        exportRatePence = agileExport;
+        console.log(`[optimizer] Outgoing Agile export rate: ${exportRatePence.toFixed(2)}p/kWh`);
+      } else {
+        console.warn('[optimizer] Failed to get Outgoing Agile rate, falling back to fixed schedule');
+      }
+    }
+    if (exportRatePence === 0 && config.exportTariffSchedule) {
+      exportRatePence = getFixedExportRate(config.exportTariffSchedule);
+      if (exportRatePence > 0) {
+        console.log(`[optimizer] Fixed export rate: ${exportRatePence}p/kWh`);
+      }
+    }
+
     // Compute heat pump adjustment based on weather forecast temperature
     let hpAdjustment: number[] | undefined;
     if (hpModel && hpSlotProfile) {
@@ -195,7 +213,7 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh, exportRatePence);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -247,6 +265,7 @@ async function main() {
         ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(dailySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
         ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
         ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
+        ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
         ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }

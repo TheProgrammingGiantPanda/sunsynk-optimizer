@@ -27,6 +27,10 @@ export interface Config {
   haOutdoorTempEntity: string;
   standardTariffPence: number;
   haEvChargerEntity: string;
+  exportTariffSchedule: string;       // "RATE:YYYY-MM-DD,..." fixed schedule
+  octopusExportProduct: string;       // e.g. "OUTGOING-AGILE-BB-23-02-28" (optional)
+  octopusExportTariff: string;        // e.g. "E-1R-OUTGOING-AGILE-BB-23-02-28-G" (optional)
+  batteryRoundTripEfficiency: number; // 0–1; fraction of imported Wh recoverable on discharge (default 0.9)
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -61,6 +65,10 @@ function fromOptions(o: Record<string, unknown>): Config {
     haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
     standardTariffPence: Number(o['standard_tariff_pence'] ?? 24),
     haEvChargerEntity: String(o['ha_ev_charger_entity'] ?? ''),
+    exportTariffSchedule: String(o['export_tariff_schedule'] ?? ''),
+    octopusExportProduct: String(o['octopus_export_product'] ?? ''),
+    octopusExportTariff: String(o['octopus_export_tariff'] ?? ''),
+    batteryRoundTripEfficiency: Number(o['battery_round_trip_efficiency'] ?? 0.9),
   };
 }
 
@@ -99,5 +107,9 @@ export function loadConfig(): Config {
     ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
     standard_tariff_pence: process.env.STANDARD_TARIFF_PENCE,
     ha_ev_charger_entity: process.env.HA_EV_CHARGER_ENTITY,
+    export_tariff_schedule: process.env.EXPORT_TARIFF_SCHEDULE,
+    octopus_export_product: process.env.OCTOPUS_EXPORT_PRODUCT,
+    octopus_export_tariff: process.env.OCTOPUS_EXPORT_TARIFF,
+    battery_round_trip_efficiency: process.env.BATTERY_ROUND_TRIP_EFFICIENCY,
   });
 }

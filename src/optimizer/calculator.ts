@@ -21,6 +21,7 @@ export interface CalculationResult {
   savingVsStandardPence: number;   // saving vs buying all energy at the standard tariff rate
   pvSavingPence: number;           // saving from not needing to buy slots that solar covers
   evLoadWh: number;                // estimated EV charge load in the window (Wh)
+  exportRatePence: number;         // effective export rate used (pence/kWh)
 }
 
 /**
@@ -38,7 +39,8 @@ export function calculate(
   agileRates: PriceSlot[],
   slotProfile?: number[],      // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
   hpAdjustment?: number[],     // 48-element Wh adjustment for heat pump temperature deviation
-  evLoadWh = 0                 // estimated EV charge energy to add to house load (Wh)
+  evLoadWh = 0,                // estimated EV charge energy to add to house load (Wh)
+  exportRatePence = 0          // effective export rate (pence/kWh); slots above this are skipped
 ): CalculationResult {
   const now = new Date();
 
@@ -107,28 +109,42 @@ export function calculate(
 
   windowRates.sort((a, b) => a.value_inc_vat - b.value_inc_vat);
 
+  // Account for battery round-trip losses.
+  // Each imported Wh yields only `eff` Wh of usable discharge energy.
+  // So to store `batteryToFill` Wh we must import `batteryToFill / eff` Wh.
+  // For the export rate filter: importing at price P beats exporting at rate X
+  // only when P/eff < X  →  P < X * eff.
+  const eff = Math.max(0.5, Math.min(1, config.batteryRoundTripEfficiency ?? 0.9));
+
+  // When we can export, only buy grid energy cheaper than the break-even point —
+  // buying above exportRate*eff means the effective stored cost exceeds what we'd earn exporting.
+  const importCandidates = exportRatePence > 0
+    ? windowRates.filter(r => r.value_inc_vat < exportRatePence * eff)
+    : windowRates;
+
   const lowestPrice = windowRates.length > 0
     ? windowRates[0].value_inc_vat / 100
     : 0;
 
-  const blocks = Math.ceil(batteryToFill / config.batteryFillRateWh);
-  const hasNegativeSlots = windowRates.some(r => r.value_inc_vat < 0);
+  // Divide by efficiency: more grid import needed to achieve the same stored Wh
+  const blocks = Math.ceil(batteryToFill / (config.batteryFillRateWh * eff));
+  const hasNegativeSlots = importCandidates.some(r => r.value_inc_vat < 0);
 
   let threshold: number;
 
   if (blocks < 1 && !hasNegativeSlots) {
     threshold = config.minChargeFloorPence;
-  } else if (!windowRates.length) {
+  } else if (!importCandidates.length) {
     threshold = config.minChargeFloorPence;
   } else {
     const blocksToUse = hasNegativeSlots && blocks < 1 ? 1 : blocks;
-    const idx = Math.min(blocksToUse - 1, windowRates.length - 1);
-    threshold = Math.max(Math.ceil(windowRates[idx].value_inc_vat), config.minChargeFloorPence);
+    const idx = Math.min(blocksToUse - 1, importCandidates.length - 1);
+    threshold = Math.max(Math.ceil(importCandidates[idx].value_inc_vat), config.minChargeFloorPence);
   }
 
   // ── 4. Cost savings vs peak-hour Agile and standard tariff ──────────────
-  const purchasedSlots = blocks > 0 ? windowRates.slice(0, blocks) : [];
-  const energyPurchasedWh = blocks > 0 ? blocks * config.batteryFillRateWh : 0;
+  const purchasedSlots = blocks > 0 ? importCandidates.slice(0, blocks) : [];
+  const energyPurchasedWh = blocks > 0 ? Math.min(blocks, importCandidates.length) * config.batteryFillRateWh : 0;
   const energyPurchasedKwh = energyPurchasedWh / 1000;
 
   const actualCostPence = purchasedSlots.reduce(
@@ -150,7 +166,7 @@ export function calculate(
   // blocksWithoutPV uses batteryToFillNoPV (ignores solar); if PV created surplus,
   // blocksWithoutPV > blocks and the difference is what solar saved us buying.
   const blocksWithoutPV = Math.max(0, Math.ceil(batteryToFillNoPV / config.batteryFillRateWh));
-  const pvSavedSlots = blocksWithoutPV > blocks ? windowRates.slice(blocks, blocksWithoutPV) : [];
+  const pvSavedSlots = blocksWithoutPV > blocks ? importCandidates.slice(blocks, blocksWithoutPV) : [];
   const pvSavingPence = pvSavedSlots.reduce(
     (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
   );
@@ -163,7 +179,8 @@ export function calculate(
     `[calculator] Battery ${batteryPct}%, batteryToFill=${batteryToFill.toFixed(0)} Wh, ` +
     `pvTotal=${pvTotal.toFixed(0)} Wh (p50=${pvTotalP50.toFixed(0)}, adj=${confidenceAdj}%), ` +
     `houseUsage=${houseUsage.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh, ` +
-    `blocks=${blocks}, threshold=${threshold}p`
+    `blocks=${blocks}, threshold=${threshold}p, eff=${(eff * 100).toFixed(0)}%` +
+    (exportRatePence > 0 ? `, exportRate=${exportRatePence}p (break-even=${(exportRatePence * eff).toFixed(1)}p, ${importCandidates.length} import candidates)` : '')
   );
 
   return {
@@ -185,5 +202,6 @@ export function calculate(
     savingVsStandardPence: Math.round(savingVsStandardPence * 10) / 10,
     pvSavingPence:         Math.round(pvSavingPence * 10) / 10,
     evLoadWh:              Math.round(evLoadWh),
+    exportRatePence,
   };
 }
