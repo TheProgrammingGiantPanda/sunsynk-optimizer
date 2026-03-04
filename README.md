@@ -94,7 +94,7 @@ When an export rate is configured, the optimizer only imports grid energy cheape
 | Option | Env var | Default | Description |
 |---|---|---|---|
 | `solcast_api_key` | `SOLCAST_API_KEY` | — | Solcast API key |
-| `solcast_sites` | `SOLCAST_SITES` | — | Comma-separated Solcast site IDs (one per array, e.g. `"abc-123,def-456"`) |
+| `solcast_sites` | `SOLCAST_SITES` | — | Comma-separated Solcast site IDs (one per array, e.g. `"abc-123,def-456"`). The hobbyist plan supports a maximum of 2 sites. |
 | `forecast_fetch_times` | `FORECAST_FETCH_TIMES` | `06:00,12:00` | Daily times to refresh Solcast forecasts (keeps within 10 calls/day quota) |
 | `forecast_confidence_factor` | `FORECAST_CONFIDENCE_FACTOR` | `0.3` | How much to lean towards the pessimistic (p10) forecast on uncertain days. `0` = always use p50, `1` = fully weight by p10/p90 spread. Overridden by `auto_tune_confidence` when enabled. |
 
