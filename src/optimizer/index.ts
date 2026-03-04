@@ -141,6 +141,10 @@ async function main() {
         ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' }),
         ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' }),
         ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
+        ...(slotProfile ? [ha('sensor.sunsynk_optimizer_slot_profile',
+          slotProfile.reduce((a, b) => a + b, 0),
+          { unit_of_measurement: 'Wh', friendly_name: 'Avg daily consumption profile', slots: slotProfile }
+        )] : []),
       ]);
       console.log('[optimizer] HA sensors updated');
     } catch (err) {
