@@ -239,6 +239,16 @@ Go to the add-on **Configuration** tab and fill in your credentials and site IDs
 
 Click **Start**. Check the **Log** tab to confirm it is running correctly.
 
+### 5. Add the Lovelace dashboard (optional)
+
+A ready-made dashboard is included in the repository at `lovelace-dashboard.yaml`.
+
+1. In Home Assistant go to **Settings → Dashboards → Add Dashboard** and give it a name (e.g. *Sunsynk Optimizer*).
+2. Open the new dashboard, click **⋮ → Edit → Raw configuration editor**.
+3. Paste the contents of `lovelace-dashboard.yaml` and save.
+
+> **Note:** Find the line marked `# ★` and replace the example battery SOC entity with your own Sunsynk SOC sensor. All other entities are created automatically by the add-on.
+
 ---
 
 ## HA Sensors
@@ -449,4 +459,5 @@ src/
 config.yaml                 HA add-on manifest and schema
 Dockerfile                  Builds and runs the optimizer on node:20-alpine
 repository.json             Required by HA add-on store
+lovelace-dashboard.yaml     Ready-made 3-view Lovelace dashboard for all optimizer sensors
 ```
