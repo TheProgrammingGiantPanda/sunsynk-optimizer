@@ -192,34 +192,4 @@ export default class SunsyncClient {
     await this.login(usernameOrEmail, password);
     return this.setMinCharge(plantId, minPricePence);
   }
-
-  /**
-   * Returns the current battery state-of-charge (SOC) as a percentage (0–100).
-   * Uses GET /api/v1/plant/{plantId}/energy for today's date.
-   * NOTE: If this returns null, inspect portal network traffic for the correct endpoint
-   * (try GET /api/v1/inverter/{sn}/realtime/battery as an alternative).
-   */
-  async getBatterySOC(plantId: string | number): Promise<number> {
-    if (!this.token)
-      throw new Error('Authentication required: call login() first');
-
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const res = await this.axios.get(`/api/v1/plant/${plantId}/energy`, {
-      params: { date: today, id: String(plantId), lan: 'en' },
-      headers: this._authHeaders()
-    });
-
-    const soc =
-      res.data?.data?.batterySOC ??
-      res.data?.data?.soc ??
-      res.data?.data?.battery?.soc ??
-      null;
-
-    if (soc === null) {
-      throw new Error(
-        `batterySOC not found in response. Keys: ${JSON.stringify(Object.keys(res.data?.data ?? {}))}`
-      );
-    }
-    return Number(soc);
-  }
 }
