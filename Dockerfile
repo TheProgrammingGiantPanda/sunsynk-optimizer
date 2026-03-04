@@ -1,5 +1,8 @@
-ARG BUILD_FROM=node:20-alpine
+ARG BUILD_FROM
 FROM $BUILD_FROM
+
+# HA base images are Alpine-based but don't include Node.js
+RUN apk add --no-cache nodejs npm
 
 WORKDIR /app
 
