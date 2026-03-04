@@ -7,17 +7,21 @@ Every 30 minutes (aligned to Agile half-hour boundaries) it:
 1. Reads the current battery state-of-charge and live battery parameters from Home Assistant
 2. Fetches the latest Octopus Agile half-hourly import prices
 3. Resolves the current export rate (fixed schedule or live Outgoing Agile)
-4. Uses the Solcast solar forecast to estimate PV generation before the peak period
-5. Estimates house load from historical consumption profiles (heat-pump-adjusted if configured)
+4. Uses the Solcast solar forecast to estimate PV generation over the Agile horizon
+5. Estimates house load from historical consumption profiles (auto-calibrated from HA history; heat-pump-adjusted if configured)
 6. Estimates EV charge load if a charger entity is configured
-7. Calculates the cheapest grid import slots needed, accounting for battery efficiency and export rate
-8. Calculates a sell-to-grid threshold when genuine surplus energy exists and the export rate beats the break-even
-9. Sets the Sunsynk import and sell thresholds via the Sunsynk API
-10. Publishes all intermediate values back to Home Assistant as sensors
+7. Optionally blends carbon intensity into slot scoring to prefer lower-carbon cheap slots
+8. Calculates the cheapest grid import slots needed, accounting for battery efficiency and export rate
+9. Calculates a sell-to-grid threshold when genuine surplus energy exists and the export rate beats the break-even
+10. Sets the Sunsynk import and sell thresholds via the Sunsynk API
+11. Publishes all intermediate values back to Home Assistant as sensors
+
+**Automatic safeguards:**
+- Raises the minimum discharge SoC on days with a poor solar forecast (configurable threshold)
+- Sends a HA persistent notification when upcoming Agile slots have negative prices
+- Tracks Solcast forecast accuracy over 7 and 30 days; can auto-tune the confidence factor
 
 Solar forecasts are fetched from Solcast at scheduled times (default 06:00 and 12:00) to stay within the hobbyist API quota of 10 calls per day. Forecasts are cached to disk so the optimizer continues working across restarts and Solcast rate-limit errors.
-
-When upcoming Agile slots have negative prices (you are paid to consume), a Home Assistant persistent notification is raised automatically listing the affected slots. It is dismissed on the next price update once negative slots have passed.
 
 ---
 
@@ -91,7 +95,7 @@ When an export rate is configured, the optimizer only imports grid energy cheape
 | `solcast_api_key` | `SOLCAST_API_KEY` | — | Solcast API key |
 | `solcast_sites` | `SOLCAST_SITES` | — | Comma-separated Solcast site IDs (one per array, e.g. `"abc-123,def-456"`) |
 | `forecast_fetch_times` | `FORECAST_FETCH_TIMES` | `06:00,12:00` | Daily times to refresh Solcast forecasts (keeps within 10 calls/day quota) |
-| `forecast_confidence_factor` | `FORECAST_CONFIDENCE_FACTOR` | `0.3` | How much to lean towards the pessimistic (p10) forecast on uncertain days. `0` = always use p50, `1` = fully weight by p10/p90 spread. |
+| `forecast_confidence_factor` | `FORECAST_CONFIDENCE_FACTOR` | `0.3` | How much to lean towards the pessimistic (p10) forecast on uncertain days. `0` = always use p50, `1` = fully weight by p10/p90 spread. Overridden by `auto_tune_confidence` when enabled. |
 
 ### House consumption
 
@@ -99,7 +103,7 @@ When an export rate is configured, the optimizer only imports grid energy cheape
 |---|---|---|---|
 | `ha_load_daily_entity` | `HA_LOAD_DAILY_ENTITY` | `sensor.solarsynkv3_…_load_daily_used` | Daily load entity used to build a per-slot consumption profile from history |
 | `consumption_average_days` | `CONSUMPTION_AVERAGE_DAYS` | `7` | Number of days of history to average for the consumption profile |
-| `avg_consumption_wh` | `AVG_CONSUMPTION_WH` | `500` | Fallback house consumption per 30-min slot (Wh), used only if HA history is unavailable. The optimizer computes this automatically from history when possible; this value is a last-resort fallback. |
+| `avg_consumption_wh` | `AVG_CONSUMPTION_WH` | `500` | Last-resort fallback house consumption per 30-min slot (Wh). The optimizer derives this automatically from HA history when possible; this value is only used if history is completely unavailable. |
 
 ### Heat pump (optional)
 
@@ -129,7 +133,7 @@ If configured, the optimizer builds a model of heat pump power vs outdoor temper
 
 ### Forecast accuracy tracking (optional)
 
-If `ha_pv_daily_entity` is configured, the optimizer compares yesterday's Solcast P50 prediction against actual generation each time forecasts are refreshed (06:00 and 12:00). Accuracy records are persisted to `/data/forecast_accuracy.json` (up to 90 days). When enough data is available, MAPE sensors are written and `forecastConfidenceFactor` can be auto-tuned.
+If `ha_pv_daily_entity` is configured, the optimizer compares yesterday's Solcast P50 prediction against actual generation each time forecasts are refreshed (06:00 and 12:00). Accuracy records are persisted to `/data/forecast_accuracy.json` (up to 90 days). When enough data is available, MAPE sensors are written and `forecast_confidence_factor` can be auto-tuned.
 
 | Option | Env var | Default | Description |
 |---|---|---|---|
@@ -187,10 +191,12 @@ You should see output like:
 [optimizer] Using plant: My Home (id=414684)
 [optimizer] Fetching solar forecasts from Solcast (2 site(s))…
 [optimizer] Forecasts updated: 48 merged slots
+[optimizer] Solar forecast tomorrow: 8400 Wh — min SOC unchanged at 20%
 [optimizer] Fixed export rate: 15p/kWh
 [optimizer] Battery: 52.1V × 200Ah = 10420 Wh capacity, fill rate 2605 Wh/slot
+[homeassistant] Slot profile built from 7 days (implied daily total: 14.2 kWh)
 [calculator] Battery 65%, expensiveDemand=3647 Wh (4 slots ≥25p), batteryToFill=0 Wh, pvTotal=8200 Wh (p50=9100, adj=-9.9%), houseUsage=3500 Wh, surplus=4700 Wh, blocks=0, threshold=10p, eff=90%, exportRate=15p (break-even=13.5p, 6 import candidates)
-[2026-03-04T08:00:00.000Z] Set min charge threshold to 10p (battery 65%)
+[optimizer] Set min charge threshold to 10p (battery 65%)
 [optimizer] HA sensors updated
 ```
 
@@ -228,48 +234,87 @@ Click **Start**. Check the **Log** tab to confirm it is running correctly.
 
 ## HA Sensors
 
-After each price update the following sensors are written to Home Assistant:
+After each price update the following sensors are written to Home Assistant.
+
+### Battery & thresholds
 
 | Entity | Unit | Description |
 |---|---|---|
 | `sensor.sunsynk_optimizer_threshold` | p/kWh | Charge threshold set on Sunsynk |
 | `sensor.sunsynk_optimizer_effective_min_soc` | % | Active minimum discharge SoC — equals `min_discharge_soc` normally, or `backup_min_soc` when tomorrow's solar forecast is below `low_solar_threshold_wh` |
-| `sensor.sunsynk_optimizer_avg_consumption_wh` | Wh | Average house consumption per 30-min slot in use. Attribute `source` shows `"history"` (auto-derived) or `"config"` (static fallback). |
-| `sensor.sunsynk_optimizer_forecast_accuracy_7d` | % | Solcast forecast MAPE over last 7 days (only present once ≥2 complete records exist). Lower is better. |
-| `sensor.sunsynk_optimizer_forecast_accuracy_30d` | % | Solcast forecast MAPE over last 30 days. |
-| `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
-| `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
-| `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |
-| `sensor.sunsynk_optimizer_pv_total` | Wh | PV forecast over Agile horizon (confidence-adjusted) |
-| `sensor.sunsynk_optimizer_pv_total_p50` | Wh | PV forecast over Agile horizon (raw p50, for comparison) |
-| `sensor.sunsynk_optimizer_house_usage` | Wh | Estimated house consumption over Agile horizon |
 | `sensor.sunsynk_optimizer_battery_watts` | Wh | Current battery charge |
 | `sensor.sunsynk_optimizer_battery_to_fill` | Wh | Grid import needed (accounting for solar) |
 | `sensor.sunsynk_optimizer_battery_to_fill_no_pv` | Wh | Grid import needed (ignoring solar) |
-| `sensor.sunsynk_optimizer_surplus` | Wh | Solar surplus to peak |
-| `sensor.sunsynk_optimizer_blocks` | — | Number of 30-min charging slots to buy |
-| `sensor.sunsynk_optimizer_results` | — | Agile slots in window (full slot data in attributes) |
-| `sensor.sunsynk_optimizer_actual_cost` | p | Planned grid charge cost at Agile prices |
+
+### Forecast & consumption
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_pv_total` | Wh | PV forecast over Agile horizon (confidence-adjusted) |
+| `sensor.sunsynk_optimizer_pv_total_p50` | Wh | PV forecast over Agile horizon (raw p50, for comparison) |
+| `sensor.sunsynk_optimizer_house_usage` | Wh | Estimated house consumption over Agile horizon |
+| `sensor.sunsynk_optimizer_avg_consumption_wh` | Wh | Avg house consumption per 30-min slot in use. Attribute `source`: `"history"` (auto-derived) or `"config"` (static fallback). |
+| `sensor.sunsynk_optimizer_forecast_accuracy_7d` | % | Solcast forecast MAPE over last 7 days (present once ≥2 complete records exist). Lower is better. |
+| `sensor.sunsynk_optimizer_forecast_accuracy_30d` | % | Solcast forecast MAPE over last 30 days. |
+| `sensor.sunsynk_optimizer_surplus` | Wh | Solar surplus above peak demand |
+
+### Pricing & charging
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
+| `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
+| `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |
 | `sensor.sunsynk_optimizer_peak_slot_price` | p/kWh | Agile price at peak hour (reference price) |
-| `sensor.sunsynk_optimizer_daily_saving_vs_peak` | p | Saving today vs buying all energy at peak-hour Agile price |
-| `sensor.sunsynk_optimizer_daily_saving_vs_standard` | p | Saving today vs buying at the configured standard tariff rate |
-| `sensor.sunsynk_optimizer_daily_pv_saving` | p | Saving today from solar reducing grid imports |
-| `sensor.sunsynk_optimizer_daily_export_income` | p | Export income earned today |
-| `sensor.sunsynk_optimizer_weekly_saving_vs_standard` | p | Saving this ISO week vs standard tariff |
-| `sensor.sunsynk_optimizer_weekly_export_income` | p | Export income earned this ISO week |
-| `sensor.sunsynk_optimizer_monthly_saving_vs_standard` | p | Saving this calendar month vs standard tariff |
-| `sensor.sunsynk_optimizer_monthly_export_income` | p | Export income earned this calendar month |
-| `sensor.sunsynk_optimizer_daily_co2_saved` | g | Estimated CO₂ saved today vs importing at peak (gCO₂) |
-| `sensor.sunsynk_optimizer_weekly_co2_saved` | g | Estimated CO₂ saved this ISO week (gCO₂) |
-| `sensor.sunsynk_optimizer_monthly_co2_saved` | g | Estimated CO₂ saved this calendar month (gCO₂) |
-| `sensor.sunsynk_optimizer_ev_load` | Wh | Estimated EV charge load to peak (only present when charging) |
+| `sensor.sunsynk_optimizer_blocks` | — | Number of 30-min charging slots to buy |
+| `sensor.sunsynk_optimizer_actual_cost` | p | Planned grid charge cost at Agile prices |
+| `sensor.sunsynk_optimizer_results` | — | Agile slots in window (full slot data in attributes) |
+
+### Export
+
+| Entity | Unit | Description |
+|---|---|---|
 | `sensor.sunsynk_optimizer_export_rate` | p/kWh | Effective export rate in use (only present when configured) |
 | `sensor.sunsynk_optimizer_exportable_wh` | Wh | Energy available to sell to grid |
 | `sensor.sunsynk_optimizer_sell_threshold` | p/kWh | Sell-to-grid threshold set on Sunsynk (0 when selling disabled) |
 | `sensor.sunsynk_optimizer_export_slot_count` | — | Number of upcoming slots planned for battery export |
 | `sensor.sunsynk_optimizer_export_income` | p | Expected income from planned battery-to-grid sales |
-| `sensor.sunsynk_optimizer_hp_adjustment` | Wh | Heat pump load adjustment vs historical (only present when configured) |
+
+### Daily savings
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_daily_saving_vs_peak` | p | Saving today vs buying all energy at peak-hour Agile price |
+| `sensor.sunsynk_optimizer_daily_saving_vs_standard` | p | Saving today vs buying at the configured standard tariff rate |
+| `sensor.sunsynk_optimizer_daily_pv_saving` | p | Saving today from solar reducing grid imports |
+| `sensor.sunsynk_optimizer_daily_export_income` | p | Export income earned today |
+| `sensor.sunsynk_optimizer_daily_co2_saved` | g | Estimated CO₂ saved today vs importing at peak (gCO₂) |
+
+### Weekly & monthly savings
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_weekly_saving_vs_standard` | p | Saving this ISO week vs standard tariff |
+| `sensor.sunsynk_optimizer_weekly_export_income` | p | Export income earned this ISO week |
+| `sensor.sunsynk_optimizer_weekly_co2_saved` | g | Estimated CO₂ saved this ISO week (gCO₂) |
+| `sensor.sunsynk_optimizer_monthly_saving_vs_standard` | p | Saving this calendar month vs standard tariff |
+| `sensor.sunsynk_optimizer_monthly_export_income` | p | Export income earned this calendar month |
+| `sensor.sunsynk_optimizer_monthly_co2_saved` | g | Estimated CO₂ saved this calendar month (gCO₂) |
+
+### Optional sensors
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_ev_load` | Wh | Estimated EV charge load to peak (only present when EV is charging) |
+| `sensor.sunsynk_optimizer_hp_adjustment` | Wh | Heat pump load adjustment vs historical (only present when heat pump is configured) |
 | `sensor.sunsynk_optimizer_slot_profile` | Wh | Total daily consumption profile (only present when HA history available) |
+
+### HA Notifications
+
+| Notification ID | Trigger | Auto-dismissed |
+|---|---|---|
+| `sunsynk_optimizer` | Failed SOC read or failed Sunsynk API call | Yes, on next successful run |
+| `sunsynk_optimizer_negative_prices` | One or more upcoming Agile slots have a negative price | Yes, when no negative slots remain |
 
 ---
 
@@ -279,7 +324,7 @@ After each price update the following sensors are written to Home Assistant:
 
 All calculations use every available Agile rate (typically up to 24–36 h ahead). The horizon is bounded naturally by how far Octopus publishes prices.
 
-Agile slots are split into two groups based on `expensive_threshold_pence`:
+Agile slots are split into two groups based on `expensive_threshold_pence` (or a dynamically computed percentile if `expensive_threshold_percentile` is set):
 - **Expensive** (≥ threshold): the battery must cover house load; grid import is avoided.
 - **Cheap** (< threshold): grid import is acceptable; these are candidates for cheap charging.
 
@@ -287,15 +332,23 @@ Agile slots are split into two groups based on `expensive_threshold_pence`:
 
 Solcast p50 (median) estimates are summed across all 30-min slots in the window. On uncertain days (wide p10–p90 band), the estimate is adjusted down towards p10 according to `forecast_confidence_factor`. This prevents over-relying on solar on cloudy days.
 
+If `ha_pv_daily_entity` is configured, forecast accuracy is tracked daily. When `auto_tune_confidence` is enabled the confidence factor adjusts automatically — a MAPE of 30% produces a factor of 0.3, 50% produces 0.5, and so on.
+
 ### 3. House usage
 
-A per-slot consumption profile is built from `consumption_average_days` of HA history. If a heat pump entity is configured, expected consumption is adjusted up or down based on how today's forecast temperature differs from the historical average for each slot. If no history is available, `avg_consumption_wh` is used as a flat fallback.
+A per-slot consumption profile is built from `consumption_average_days` of HA history. The per-slot average is also derived from history and used as a fallback when the full profile is unavailable; `avg_consumption_wh` is only used as a last resort if HA history is unreachable.
 
-### 4. EV load
+If a heat pump entity is configured, expected consumption is adjusted up or down based on how today's forecast temperature differs from the historical average for each slot.
 
-If an EV charger entity is configured and the charger is actively drawing power, the optimizer projects `chargePower × hoursTopeak` Wh as additional house load. This conservatively assumes charging continues at the current rate until peak.
+### 4. Dynamic minimum SoC
 
-### 5. Battery demand and grid import needed
+If `low_solar_threshold_wh` is set, the optimizer checks tomorrow's Solcast P50 total (from the existing cache — no extra API calls). When predicted generation is below the threshold, the minimum discharge SoC is raised to `backup_min_soc` automatically, protecting against running the battery flat overnight on a poor solar day.
+
+### 5. EV load
+
+If an EV charger entity is configured and the charger is actively drawing power, the optimizer projects `chargePower × hoursToFirstExpensiveSlot` Wh as additional house load.
+
+### 6. Battery demand and grid import needed
 
 ```
 totalExpensiveDemand = Σ max(0, houseLoad − pvGeneration) over expensive slots
@@ -303,9 +356,9 @@ pvSurplusCheap       = Σ max(0, pvGeneration − houseLoad) over cheap slots
 batteryToFill        = max(0, totalExpensiveDemand − currentBattery − pvSurplusCheap × eff)
 ```
 
-PV during expensive slots offsets demand directly (reducing how much battery is needed). PV surplus during cheap slots pre-charges the battery for free, reducing the grid import needed, adjusted by round-trip efficiency.
+PV during expensive slots offsets demand directly. PV surplus during cheap slots pre-charges the battery for free, adjusted by round-trip efficiency.
 
-### 6. Charging blocks
+### 7. Charging blocks
 
 ```
 blocks = ceil(batteryToFill / (fillRatePerSlot × roundTripEfficiency))
@@ -313,7 +366,7 @@ blocks = ceil(batteryToFill / (fillRatePerSlot × roundTripEfficiency))
 
 Because not all imported energy is recoverable from the battery (conversion losses), more grid slots are needed than a naive calculation would suggest. At 90% efficiency, storing 5 kWh requires importing 5 ÷ 0.9 = 5.56 kWh.
 
-### 7. Export rate filtering
+### 8. Export rate filtering
 
 If an export rate is configured, only grid slots cheaper than the break-even price are considered:
 
@@ -321,17 +374,17 @@ If an export rate is configured, only grid slots cheaper than the break-even pri
 break-even = exportRate × roundTripEfficiency
 ```
 
-Importing above the break-even means the effective cost per stored kWh exceeds the export income you'd forgo, making it uneconomic. For example at 15p export and 90% efficiency, break-even = 13.5p — importing at 14p would cost 14 ÷ 0.9 = 15.6p effective, worse than exporting.
+For example at 15p export and 90% efficiency, break-even = 13.5p — importing at 14p would cost 14 ÷ 0.9 = 15.6p effective, worse than exporting.
 
-### 8. Threshold
+### 9. Threshold
 
 The Agile slots are sorted cheapest-first and the `blocks`-th cheapest qualifying slot sets the threshold. The Sunsynk inverter charges from the grid whenever the live Agile price is below this threshold.
 
-### 9. Negative prices
+### 10. Negative prices
 
-If any slot in the window has a negative price (you are paid to use electricity), the optimizer always includes at least one charging slot regardless of battery level.
+If any slot in the window has a negative price (you are paid to use electricity), the optimizer always includes at least one charging slot regardless of battery level. A HA notification is also raised listing the affected slots and their prices.
 
-### 10. Sell threshold
+### 11. Sell threshold
 
 When two conditions both hold, the optimizer enables battery-to-grid selling:
 
@@ -344,7 +397,7 @@ breakEvenSell = cheapestFutureImport / roundTripEfficiency
 sellThreshold = ceil(breakEvenSell)   if both conditions hold, else 0 (disabled)
 ```
 
-The sell threshold is set on the Sunsynk inverter as a `direction=2` rate. Sunsynk sells whenever the live export price exceeds this value. When selling is not worthwhile the threshold is set to 9999p, effectively disabling it.
+The sell threshold is set on the Sunsynk inverter as a `direction=0` rate. When selling is not worthwhile the threshold is set to 999p, effectively disabling it.
 
 ---
 
@@ -356,21 +409,26 @@ src/
   optimizer/
     index.ts                Main entry point — wires everything together
     config.ts               Loads /data/options.json (HA) or .env (dev)
-    solcast.ts              Fetches and caches Solcast rooftop forecasts
-    octopus.ts              Fetches Octopus Agile rates; fixed export rate parser
     calculator.ts           Core optimisation algorithm
     scheduler.ts            Daily time scheduler + Agile-aligned interval runner
-    homeassistant.ts        HA REST API client (sensors, notifications, slot profiles)
+    solcast.ts              Fetches and caches Solcast rooftop forecasts
+    octopus.ts              Fetches Octopus Agile rates; fixed export rate parser
+    homeassistant.ts        HA REST API client (sensors, notifications, history)
+    savings.ts              Weekly/monthly savings history persistence
+    accuracy.ts             Solcast forecast accuracy tracking and confidence auto-tune
+    carbonintensity.ts      National Grid ESO carbon intensity forecast + slot weighting
     heatpump.ts             Heat pump model: consumption vs temperature regression
     openmeteo.ts            Weather forecast fetcher (Open-Meteo, no API key needed)
-    savings.ts              Weekly/monthly savings history persistence
-    carbonintensity.ts      National Grid ESO carbon intensity forecast + slot weighting
+    logger.ts               Patches console to prefix all output with timestamps
+    retry.ts                withRetry helper (no retry on 4xx)
     __tests__/
       calculator.test.ts    Unit tests for the core algorithm
-      octopus.test.ts       Unit tests for export rate parsing
-      solcast.test.ts       Unit tests for forecast cache logic
+      octopus.test.ts       Unit tests for Agile rate fetching and caching
+      solcast.test.ts       Unit tests for forecast cache and accuracy helpers
       homeassistant.test.ts Unit tests for HA notification helpers
-addon/
-  config.yaml               HA add-on manifest and schema
-  Dockerfile                Builds and runs the optimizer on node:20-alpine
+      accuracy.test.ts      Unit tests for forecast accuracy tracking
+      client.reauth.test.ts Unit tests for Sunsynk client token re-auth
+config.yaml                 HA add-on manifest and schema
+Dockerfile                  Builds and runs the optimizer on node:20-alpine
+repository.json             Required by HA add-on store
 ```
