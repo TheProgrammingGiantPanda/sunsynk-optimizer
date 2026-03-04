@@ -23,9 +23,10 @@ interface ApiPeriod {
  * Falls back to the national average if regionId is 0 or omitted.
  */
 export async function getCarbonIntensityForecast(regionId = 0): Promise<CarbonSlot[]> {
+  const from = new Date().toISOString();
   const url = regionId > 0
-    ? `https://api.carbonintensity.org.uk/regional/regionid/${regionId}/intensity/pt24h/fw48h`
-    : 'https://api.carbonintensity.org.uk/v2/intensity/pt24h/fw48h';
+    ? `https://api.carbonintensity.org.uk/regional/intensity/${from}/fw48h/regionid/${regionId}`
+    : `https://api.carbonintensity.org.uk/intensity/${from}/fw48h`;
 
   const res = await withRetry(
     () => axios.get(url, { timeout: 10000, headers: { Accept: 'application/json' } }),
@@ -33,7 +34,7 @@ export async function getCarbonIntensityForecast(regionId = 0): Promise<CarbonSl
   );
 
   const periods: ApiPeriod[] = regionId > 0
-    ? (res.data?.data?.[0]?.data ?? [])
+    ? (res.data?.data?.data ?? [])
     : (res.data?.data ?? []);
 
   return periods.map((p: ApiPeriod) => ({

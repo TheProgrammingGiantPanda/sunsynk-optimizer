@@ -1,5 +1,5 @@
 name: "Sunsynk Optimizer"
-version: "1.6.0"
+version: "1.6.1"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
 url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
