@@ -181,6 +181,10 @@ export default class SunsyncClient {
       products: updatedProducts
     };
 
+    const productSummary = updatedProducts.map((p: any) =>
+      `dir${p.direction}=${p.ratesThreshold}`).join(', ');
+    console.log(`[optimizer] Sending products: ${productSummary}`);
+
     try {
       const res = await this.axios.post(
         `/api/v1/plant/${plantId}/income`,

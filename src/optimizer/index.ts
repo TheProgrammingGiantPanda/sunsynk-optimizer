@@ -1,3 +1,4 @@
+import './logger';
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
 import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
@@ -270,10 +271,7 @@ async function main() {
       // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
       const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
       await client.setMinCharge(plantId, result.threshold, exportConfigured ? result.sellThreshold : undefined);
-      console.log(
-        `[${new Date().toISOString()}] Set min charge threshold to ${result.threshold}p ` +
-        `(battery ${batteryPct}%)`
-      );
+      console.log(`[optimizer] Set min charge threshold to ${result.threshold}p (battery ${batteryPct}%)`);
       dismissNotification(config.haUrl, config.haToken).catch(() => {});
     } catch (err) {
       console.error('[optimizer] Failed to set min charge:', err);
