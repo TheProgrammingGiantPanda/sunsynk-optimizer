@@ -16,3 +16,10 @@ tsconfig.tsbuildinfo
 .idea/
 /.pnp
 .pnp.js
+
+# Runtime-generated cache and state files (written to cwd in dev, /data in HA)
+pv_forecast_cache.json
+agile_rates_cache.json
+agile_export_cache.json
+daily_accumulators.json
+savings_history.json
