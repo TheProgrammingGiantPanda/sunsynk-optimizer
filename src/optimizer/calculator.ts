@@ -22,6 +22,8 @@ export interface CalculationResult {
   pvSavingPence: number;           // saving from not needing to buy slots that solar covers
   evLoadWh: number;                // estimated EV charge load in the window (Wh)
   exportRatePence: number;         // effective export rate used (pence/kWh)
+  exportableWh: number;            // Wh of genuine surplus (max(0, floor(−batteryToFill)))
+  sellThreshold: number;           // price above which Sunsynk should sell (0 = disabled, otherwise ceil(breakEven))
 }
 
 /**
@@ -171,6 +173,17 @@ export function calculate(
     (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
   );
 
+  // ── 5. Sell-to-grid threshold ─────────────────────────────────────────────
+  // Genuine surplus: energy that would overflow the battery regardless.
+  // breakEvenSell: min export price at which selling beats reimporting later.
+  const exportableWh = Math.max(0, Math.floor(-batteryToFill));
+  const breakEvenSell = windowRates.length > 0
+    ? windowRates[0].value_inc_vat / eff   // cheapest future import / efficiency
+    : Infinity;
+  const sellThreshold = (exportableWh > 0 && exportRatePence > 0 && exportRatePence > breakEvenSell)
+    ? Math.ceil(breakEvenSell)
+    : 0;
+
   const confidenceAdj = pvTotalP50 > 0
     ? ((pvTotal - pvTotalP50) / pvTotalP50 * 100).toFixed(1)
     : '0.0';
@@ -180,7 +193,8 @@ export function calculate(
     `pvTotal=${pvTotal.toFixed(0)} Wh (p50=${pvTotalP50.toFixed(0)}, adj=${confidenceAdj}%), ` +
     `houseUsage=${houseUsage.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh, ` +
     `blocks=${blocks}, threshold=${threshold}p, eff=${(eff * 100).toFixed(0)}%` +
-    (exportRatePence > 0 ? `, exportRate=${exportRatePence}p (break-even=${(exportRatePence * eff).toFixed(1)}p, ${importCandidates.length} import candidates)` : '')
+    (exportRatePence > 0 ? `, exportRate=${exportRatePence}p (break-even=${(exportRatePence * eff).toFixed(1)}p, ${importCandidates.length} import candidates)` : '') +
+    (sellThreshold > 0 ? `, sell=${sellThreshold}p (exportable=${exportableWh} Wh)` : '')
   );
 
   return {
@@ -203,5 +217,7 @@ export function calculate(
     pvSavingPence:         Math.round(pvSavingPence * 10) / 10,
     evLoadWh:              Math.round(evLoadWh),
     exportRatePence,
+    exportableWh,
+    sellThreshold,
   };
 }

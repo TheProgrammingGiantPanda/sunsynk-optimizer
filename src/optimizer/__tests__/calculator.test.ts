@@ -219,4 +219,50 @@ describe('calculate', () => {
     // threshold must be below the break-even (15 * 0.8 = 12p)
     expect(result.threshold).toBeLessThan(12);
   });
+
+  // ── Sell-to-grid threshold ───────────────────────────────────────────────
+
+  it('sellThreshold is 0 when no surplus (batteryToFill >= 0)', () => {
+    // Battery 50%, no PV → batteryToFill = 5000 Wh (positive) → no exportable surplus
+    const result = calculate(BASE_CONFIG, 50, [], RATES, undefined, undefined, 0, 15);
+    expect(result.exportableWh).toBe(0);
+    expect(result.sellThreshold).toBe(0);
+  });
+
+  it('sellThreshold is 0 when export rate not configured (exportRatePence = 0)', () => {
+    // Battery full + PV surplus → exportableWh > 0, but exportRatePence = 0 → no selling
+    // batteryToFill = 10000 - 10000 - 4000 = -4000; exportableWh = 4000
+    const result = calculate(BASE_CONFIG, 100, PV_8_SLOTS, RATES);
+    expect(result.exportableWh).toBe(4000);
+    expect(result.sellThreshold).toBe(0);
+  });
+
+  it('sellThreshold is 0 when export rate <= break-even', () => {
+    // eff=1.0, cheapest rate=10p → breakEvenSell=10p; exportRatePence=10 is not strictly greater
+    const result = calculate(BASE_CONFIG, 100, PV_8_SLOTS, RATES, undefined, undefined, 0, 10);
+    expect(result.exportableWh).toBe(4000);
+    expect(result.sellThreshold).toBe(0);
+  });
+
+  it('sellThreshold = ceil(breakEven) when surplus exists and export rate > break-even', () => {
+    // eff=1.0, cheapest rate=10p → breakEvenSell=10p; exportRatePence=12 > 10
+    // sellThreshold = ceil(10/1.0) = 10
+    const result = calculate(BASE_CONFIG, 100, PV_8_SLOTS, RATES, undefined, undefined, 0, 12);
+    expect(result.exportableWh).toBe(4000);
+    expect(result.sellThreshold).toBe(10);
+  });
+
+  it('sellThreshold rounds up to ceil(breakEven) with fractional efficiency', () => {
+    // eff=0.8, cheapest rate=10p → breakEvenSell = 10/0.8 = 12.5p; exportRatePence=15 > 12.5
+    // sellThreshold = ceil(12.5) = 13
+    const config = { ...BASE_CONFIG, batteryRoundTripEfficiency: 0.8 };
+    const result = calculate(config, 100, PV_8_SLOTS, RATES, undefined, undefined, 0, 15);
+    expect(result.sellThreshold).toBe(13);
+  });
+
+  it('exportableWh equals the overflow above battery capacity when batteryToFill < 0', () => {
+    // Battery full (10000 Wh) + 4000 Wh PV surplus → batteryToFill = -4000 → exportableWh = 4000
+    const result = calculate(BASE_CONFIG, 100, PV_8_SLOTS, RATES);
+    expect(result.exportableWh).toBe(4000);
+  });
 });

@@ -228,7 +228,7 @@ async function main() {
     dailyPvSavingPence         += result.pvSavingPence;
 
     try {
-      await client.setMinCharge(plantId, result.threshold);
+      await client.setMinCharge(plantId, result.threshold, result.sellThreshold);
       console.log(
         `[${new Date().toISOString()}] Set min charge threshold to ${result.threshold}p ` +
         `(battery ${batteryPct}%)`
@@ -266,6 +266,8 @@ async function main() {
         ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
         ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
         ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
+        ...(result.exportableWh > 0 ? [ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh', friendly_name: 'Energy available to sell to grid' })] : []),
+        ...(result.sellThreshold > 0 ? [ha('sensor.sunsynk_optimizer_sell_threshold', result.sellThreshold, { unit_of_measurement: 'p/kWh', friendly_name: 'Sell-to-grid threshold' })] : []),
         ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }

@@ -129,6 +129,7 @@ export default class SunsyncClient {
   async setMinCharge(
     plantId: string | number,
     minPricePence: number | string,
+    sellThreshold = 0,
     options: { token?: string } = {}
   ): Promise<any> {
     const token = options.token || this.token;
@@ -151,6 +152,18 @@ export default class SunsyncClient {
     if (!products.some((p: any) => p.direction === 1)) {
       updatedProducts.push({ direction: 1, ratesThreshold: String(minPricePence) });
     }
+
+    // Update ratesThreshold for direction=2 (export/sell rate threshold).
+    // 9999 effectively disables selling; a real value enables it above that price.
+    // NOTE: direction=2 behaviour is inferred from the direction=1 pattern and needs live API verification.
+    const sellThresholdStr = sellThreshold > 0 ? String(sellThreshold) : '9999';
+    const dir2Idx = updatedProducts.findIndex((p: any) => p.direction === 2);
+    if (dir2Idx >= 0) {
+      updatedProducts[dir2Idx] = { ...updatedProducts[dir2Idx], ratesThreshold: sellThresholdStr };
+    } else {
+      updatedProducts.push({ direction: 2, ratesThreshold: sellThresholdStr });
+    }
+    console.log(`[optimizer] Sell threshold set to ${sellThresholdStr}p (direction=2) — NOTE: requires Sunsynk API verification`);
 
     // Strip server-generated fields from charges
     const charges = (plant?.charges ?? []).map(({ price, type, startRange, endRange }: any) => ({

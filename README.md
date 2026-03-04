@@ -11,8 +11,9 @@ Every 30 minutes (aligned to Agile half-hour boundaries) it:
 5. Estimates house load from historical consumption profiles (heat-pump-adjusted if configured)
 6. Estimates EV charge load if a charger entity is configured
 7. Calculates the cheapest grid import slots needed, accounting for battery efficiency and export rate
-8. Sets the Sunsynk minimum charge threshold via the Sunsynk API
-9. Publishes all intermediate values back to Home Assistant as sensors
+8. Calculates a sell-to-grid threshold when genuine surplus energy exists and the export rate beats the break-even
+9. Sets the Sunsynk import and sell thresholds via the Sunsynk API
+10. Publishes all intermediate values back to Home Assistant as sensors
 
 Solar forecasts are fetched from Solcast at scheduled times (default 06:00 and 12:00) to stay within the hobbyist API quota of 10 calls per day. Forecasts are cached to disk so the optimizer continues working across restarts and Solcast rate-limit errors.
 
@@ -224,6 +225,8 @@ After each price update the following sensors are written to Home Assistant:
 | `sensor.sunsynk_optimizer_daily_pv_saving` | p | Saving today from solar reducing grid imports |
 | `sensor.sunsynk_optimizer_ev_load` | Wh | Estimated EV charge load to peak (only present when charging) |
 | `sensor.sunsynk_optimizer_export_rate` | p/kWh | Effective export rate in use (only present when configured) |
+| `sensor.sunsynk_optimizer_exportable_wh` | Wh | Energy available to sell to grid (only present when genuine surplus exists) |
+| `sensor.sunsynk_optimizer_sell_threshold` | p/kWh | Sell-to-grid threshold set on Sunsynk (only present when selling is active) |
 | `sensor.sunsynk_optimizer_hp_adjustment` | Wh | Heat pump load adjustment vs historical (only present when configured) |
 | `sensor.sunsynk_optimizer_slot_profile` | Wh | Total daily consumption profile (only present when HA history available) |
 
@@ -281,6 +284,21 @@ The Agile slots are sorted cheapest-first and the `blocks`-th cheapest qualifyin
 ### 9. Negative prices
 
 If any slot in the window has a negative price (you are paid to use electricity), the optimizer always includes at least one charging slot regardless of battery level.
+
+### 10. Sell threshold
+
+When two conditions both hold, the optimizer enables battery-to-grid selling:
+
+1. **Genuine surplus** — `batteryToFill < 0` (solar will overflow the battery anyway, so that energy is free to sell)
+2. **Break-even satisfied** — export rate > cheapest future import ÷ efficiency (selling earns more than reimporting later would cost)
+
+```
+exportableWh  = max(0, −batteryToFill)
+breakEvenSell = cheapestFutureImport / roundTripEfficiency
+sellThreshold = ceil(breakEvenSell)   if both conditions hold, else 0 (disabled)
+```
+
+The sell threshold is set on the Sunsynk inverter as a `direction=2` rate. Sunsynk sells whenever the live export price exceeds this value. When selling is not worthwhile the threshold is set to 9999p, effectively disabling it.
 
 ---
 
