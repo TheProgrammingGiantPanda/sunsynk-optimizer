@@ -24,6 +24,8 @@ export interface Config {
   minChargeFloorPence: number;
   forecastFetchTimes: string[];
   priceIntervalMinutes: number;
+  haHeatPumpEntity: string;
+  haOutdoorTempEntity: string;
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -52,6 +54,8 @@ function fromOptions(o: Record<string, unknown>): Config {
       .split(',')
       .map(t => t.trim()),
     priceIntervalMinutes: Number(o['price_interval_minutes'] ?? 30),
+    haHeatPumpEntity: String(o['ha_heat_pump_entity'] ?? ''),
+    haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
   };
 }
 
@@ -87,5 +91,7 @@ export function loadConfig(): Config {
     min_charge_floor_pence: process.env.MIN_CHARGE_FLOOR_PENCE,
     forecast_fetch_times: process.env.FORECAST_FETCH_TIMES,
     price_interval_minutes: process.env.PRICE_INTERVAL_MINUTES,
+    ha_heat_pump_entity: process.env.HA_HEAT_PUMP_ENTITY,
+    ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
   });
 }

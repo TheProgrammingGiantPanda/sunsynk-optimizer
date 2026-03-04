@@ -5,6 +5,8 @@ import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleInterval } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh } from './homeassistant';
+import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
+import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 
 async function main() {
   const config = loadConfig();
@@ -38,6 +40,8 @@ async function main() {
   let pv1Forecasts: ForecastSlot[] = [];
   let pv2Forecasts: ForecastSlot[] = [];
   let slotProfile: number[] | undefined;
+  let hpSlotProfile: number[] | undefined;
+  let hpModel: HeatPumpModel | null = null;
 
   // Forecast + consumption fetcher
   const fetchForecasts = async () => {
@@ -67,6 +71,19 @@ async function main() {
       }
     } catch (err) {
       console.error('[optimizer] Failed to build consumption profile:', err);
+    }
+
+    if (config.haHeatPumpEntity) {
+      try {
+        const [hpProfile, model] = await Promise.all([
+          getSlotProfileWh(config.haUrl, config.haToken, config.haHeatPumpEntity, config.consumptionAverageDays),
+          buildHeatPumpModel(config.haUrl, config.haToken, config.haHeatPumpEntity, config.haOutdoorTempEntity, config.consumptionAverageDays),
+        ]);
+        if (hpProfile) hpSlotProfile = hpProfile;
+        hpModel = model;
+      } catch (err) {
+        console.error('[optimizer] Failed to build heat pump model:', err);
+      }
     }
   };
 
@@ -111,7 +128,28 @@ async function main() {
       return;
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates, slotProfile);
+    // Compute heat pump adjustment based on weather forecast temperature
+    let hpAdjustment: number[] | undefined;
+    if (hpModel && hpSlotProfile) {
+      try {
+        const now = new Date();
+        const peakTime = new Date(now);
+        peakTime.setHours(config.peakHour, 0, 0, 0);
+        if (peakTime <= now) peakTime.setDate(peakTime.getDate() + 1);
+
+        const { lat, lon } = await getHaLocation(config.haUrl, config.haToken);
+        const forecast = await getHourlyForecast(lat, lon);
+        const forecastAvgTemp = avgForecastTemp(forecast, now, peakTime);
+
+        if (!isNaN(forecastAvgTemp)) {
+          hpAdjustment = heatPumpSlotAdjustment(hpModel, forecastAvgTemp, hpSlotProfile);
+        }
+      } catch (err) {
+        console.error('[optimizer] Failed to compute HP forecast adjustment:', err);
+      }
+    }
+
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates, slotProfile, hpAdjustment);
 
     try {
       await client.setMinCharge(plantId, result.threshold);
@@ -141,6 +179,10 @@ async function main() {
         ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' }),
         ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' }),
         ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
+        ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
+          hpAdjustment.reduce((a, b) => a + b, 0),
+          { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }
+        )] : []),
         ...(slotProfile ? [ha('sensor.sunsynk_optimizer_slot_profile',
           slotProfile.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Avg daily consumption profile', slots: slotProfile }

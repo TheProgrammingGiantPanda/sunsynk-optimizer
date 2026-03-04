@@ -31,7 +31,8 @@ export function calculate(
   pv1Forecasts: ForecastSlot[],
   pv2Forecasts: ForecastSlot[],
   agileRates: PriceSlot[],
-  slotProfile?: number[]   // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
+  slotProfile?: number[],      // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
+  hpAdjustment?: number[]      // 48-element Wh adjustment for heat pump temperature deviation
 ): CalculationResult {
   const now = new Date();
 
@@ -56,11 +57,10 @@ export function calculate(
   }
 
   function slotConsumption(slotEnd: Date): number {
-    if (slotProfile) {
-      const idx = slotEnd.getUTCHours() * 2 + Math.floor(slotEnd.getUTCMinutes() / 30);
-      return slotProfile[idx] ?? config.avgConsumptionWh;
-    }
-    return config.avgConsumptionWh;
+    const idx = slotEnd.getUTCHours() * 2 + Math.floor(slotEnd.getUTCMinutes() / 30);
+    const base = slotProfile ? (slotProfile[idx] ?? config.avgConsumptionWh) : config.avgConsumptionWh;
+    const hpDelta = hpAdjustment ? (hpAdjustment[idx] ?? 0) : 0;
+    return Math.max(0, base + hpDelta);
   }
 
   for (const slot of pv1Forecasts) {
