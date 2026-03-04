@@ -14,6 +14,7 @@ pnpm-debug.log*
 tsconfig.tsbuildinfo
 .vscode/
 .idea/
+.claude/
 /.pnp
 .pnp.js
 
