@@ -47,21 +47,46 @@ export function scheduleDailyTimes(
 }
 
 /**
- * Schedule a callback to run every `intervalMinutes` minutes.
- * Fires once immediately on start.
+ * Schedule a callback aligned to Agile half-hour slot boundaries.
+ *
+ * Octopus publishes new prices at :00 and :30 each hour. We fire
+ * `offsetMinutes` after each boundary (default 2) so fresh prices are
+ * always available. After the first aligned fire, repeats every 30 min
+ * using recursive setTimeout to prevent drift.
  */
-export function scheduleInterval(
-  intervalMinutes: number,
-  callback: () => Promise<void>
+export function scheduleAgileAligned(
+  callback: () => Promise<void>,
+  offsetMinutes = 2
 ): void {
+  const SLOT_MS = 30 * 60 * 1000;
+
   const run = async () => {
     try {
       await callback();
     } catch (err) {
-      console.error('[scheduler] Interval callback error:', err);
+      console.error('[scheduler] Price update error:', err);
     }
+    setTimeout(run, SLOT_MS);
   };
 
-  run(); // run immediately
-  setInterval(run, intervalMinutes * 60 * 1000);
+  // Find ms until the next :0X or :3X fire time
+  const now = new Date();
+  const secsIntoHour =
+    now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
+
+  const t1 = offsetMinutes * 60;            // e.g. 2:00 into hour
+  const t2 = (30 + offsetMinutes) * 60;     // e.g. 32:00 into hour
+
+  let secsUntil: number;
+  if (secsIntoHour < t1)       secsUntil = t1 - secsIntoHour;
+  else if (secsIntoHour < t2)  secsUntil = t2 - secsIntoHour;
+  else                          secsUntil = 3600 - secsIntoHour + t1;
+
+  const next = new Date(now.getTime() + secsUntil * 1000);
+  console.log(
+    `[scheduler] First price update at ${next.toLocaleTimeString()} ` +
+    `(in ${Math.round(secsUntil / 60)} min), then every 30 min`
+  );
+
+  setTimeout(run, secsUntil * 1000);
 }

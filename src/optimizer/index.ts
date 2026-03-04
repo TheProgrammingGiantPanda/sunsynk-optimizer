@@ -3,7 +3,7 @@ import { loadConfig } from './config';
 import { getMergedForecast, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
-import { scheduleDailyTimes, scheduleInterval } from './scheduler';
+import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
@@ -25,7 +25,7 @@ async function main() {
   console.log(`[optimizer] Peak hour: ${config.peakHour}:00`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
   console.log(`[optimizer] Forecast fetch times: ${config.forecastFetchTimes.join(', ')}`);
-  console.log(`[optimizer] Price update interval: ${config.priceIntervalMinutes} min`);
+  console.log(`[optimizer] Price updates: aligned to Agile half-hour boundaries (+2 min offset)`);
 
   const client = new SunsyncClient();
   await client.login(config.sunsynkUsername, config.sunsynkPassword);
@@ -84,8 +84,8 @@ async function main() {
   // Schedule forecast fetches at configured times, and fetch once on start
   scheduleDailyTimes(config.forecastFetchTimes, fetchForecasts, true);
 
-  // Price update loop — runs every priceIntervalMinutes
-  scheduleInterval(config.priceIntervalMinutes, async () => {
+  // Price update loop — aligned to Agile half-hour boundaries (:02 and :32)
+  scheduleAgileAligned(async () => {
     let batteryPct: number;
     try {
       batteryPct = await getEntityState(config.haUrl, config.haToken, config.haBatterySocEntity);
