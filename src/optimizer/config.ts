@@ -19,7 +19,7 @@ export interface Config {
   batteryCapacityWh: number;
   batteryFillRateWh: number;
   avgConsumptionWh: number;
-  peakHour: number;
+  expensiveThresholdPence: number;  // slots at or above this price are "expensive" — battery covers them
   minChargeFloorPence: number;
   forecastConfidenceFactor: number;
   forecastFetchTimes: string[];
@@ -55,7 +55,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     batteryCapacityWh: Number(o['battery_capacity_wh'] ?? 10000),
     batteryFillRateWh: Number(o['battery_fill_rate_wh'] ?? 2000),
     avgConsumptionWh: Number(o['avg_consumption_wh'] ?? 500),
-    peakHour: Number(o['peak_hour'] ?? 16),
+    expensiveThresholdPence: Number(o['expensive_threshold_pence'] ?? 25),
     minChargeFloorPence: Number(o['min_charge_floor_pence'] ?? 10),
     forecastConfidenceFactor: Number(o['forecast_confidence_factor'] ?? 0.3),
     forecastFetchTimes: String(o['forecast_fetch_times'] ?? '06:00,12:00')
@@ -99,7 +99,7 @@ export function loadConfig(): Config {
     battery_capacity_wh: process.env.BATTERY_CAPACITY_WH,
     battery_fill_rate_wh: process.env.BATTERY_FILL_RATE_WH,
     avg_consumption_wh: process.env.AVG_CONSUMPTION_WH,
-    peak_hour: process.env.PEAK_HOUR,
+    expensive_threshold_pence: process.env.EXPENSIVE_THRESHOLD_PENCE,
     min_charge_floor_pence: process.env.MIN_CHARGE_FLOOR_PENCE,
     forecast_confidence_factor: process.env.FORECAST_CONFIDENCE_FACTOR,
     forecast_fetch_times: process.env.FORECAST_FETCH_TIMES,

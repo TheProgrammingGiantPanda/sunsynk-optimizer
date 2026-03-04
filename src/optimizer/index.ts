@@ -30,11 +30,11 @@ async function main() {
     throw new Error(`Invalid config: batteryCapacityWh must be a positive number (got ${config.batteryCapacityWh})`);
   if (isNaN(config.batteryFillRateWh) || config.batteryFillRateWh <= 0)
     throw new Error(`Invalid config: batteryFillRateWh must be a positive number (got ${config.batteryFillRateWh})`);
-  if (isNaN(config.peakHour) || config.peakHour < 0 || config.peakHour > 23)
-    throw new Error(`Invalid config: peakHour must be 0–23 (got ${config.peakHour})`);
+  if (isNaN(config.expensiveThresholdPence) || config.expensiveThresholdPence <= 0)
+    throw new Error(`Invalid config: expensiveThresholdPence must be a positive number (got ${config.expensiveThresholdPence})`);
 
   console.log('[optimizer] Starting Sunsynk Battery Optimizer');
-  console.log(`[optimizer] Peak hour: ${config.peakHour}:00`);
+  console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
   console.log(`[optimizer] Forecast fetch times: ${config.forecastFetchTimes.join(', ')}`);
   console.log(`[optimizer] Price updates: aligned to Agile half-hour boundaries (+2 min offset)`);
@@ -174,17 +174,20 @@ async function main() {
     }
 
     // Compute heat pump adjustment based on weather forecast temperature
+    // Horizon = end of available Agile data (naturally bounded by Octopus API)
     let hpAdjustment: number[] | undefined;
     if (hpModel && hpSlotProfile) {
       try {
         const now = new Date();
-        const peakTime = new Date(now);
-        peakTime.setHours(config.peakHour, 0, 0, 0);
-        if (peakTime <= now) peakTime.setDate(peakTime.getDate() + 1);
+        const horizonTime = rates.length > 0
+          ? new Date(rates.reduce((latest, r) =>
+              new Date(r.valid_to) > new Date(latest.valid_to) ? r : latest
+            ).valid_to)
+          : new Date(now.getTime() + 24 * 3600000);
 
         const { lat, lon } = await getHaLocation(config.haUrl, config.haToken);
         const forecast = await getHourlyForecast(lat, lon);
-        const forecastAvgTemp = avgForecastTemp(forecast, now, peakTime);
+        const forecastAvgTemp = avgForecastTemp(forecast, now, horizonTime);
 
         if (!isNaN(forecastAvgTemp)) {
           hpAdjustment = heatPumpSlotAdjustment(hpModel, forecastAvgTemp, hpSlotProfile);
@@ -194,19 +197,22 @@ async function main() {
       }
     }
 
-    // Estimate EV load to peak if charger is actively drawing power
+    // Estimate EV load to first expensive slot (or 4h fallback) if charger is drawing power
     let evLoadWh = 0;
     if (config.haEvChargerEntity) {
       try {
         const chargePowerKw = await getEntityState(config.haUrl, config.haToken, config.haEvChargerEntity);
         if (chargePowerKw > 0.1) {
           const now = new Date();
-          const peakTime = new Date(now);
-          peakTime.setHours(config.peakHour, 0, 0, 0);
-          if (peakTime <= now) peakTime.setDate(peakTime.getDate() + 1);
-          const hoursTopeak = (peakTime.getTime() - now.getTime()) / 3600000;
-          evLoadWh = Math.round(chargePowerKw * hoursTopeak * 1000);
-          console.log(`[optimizer] EV charging at ${chargePowerKw} kW, estimated ${evLoadWh} Wh to peak`);
+          const firstExpensive = rates
+            .filter(r => new Date(r.valid_to) > now && r.value_inc_vat >= config.expensiveThresholdPence)
+            .sort((a, b) => new Date(a.valid_from).getTime() - new Date(b.valid_from).getTime())[0];
+          const horizonMs = firstExpensive
+            ? new Date(firstExpensive.valid_from).getTime() - now.getTime()
+            : 4 * 3600000;
+          const hoursToHorizon = Math.max(0, horizonMs / 3600000);
+          evLoadWh = Math.round(chargePowerKw * hoursToHorizon * 1000);
+          console.log(`[optimizer] EV charging at ${chargePowerKw} kW, estimated ${evLoadWh} Wh to first expensive slot`);
         }
       } catch (err) {
         console.warn('[optimizer] Failed to read EV charger entity, assuming not charging:', err);
@@ -249,10 +255,12 @@ async function main() {
 
       await Promise.all([
         ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' }),
+        ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` }),
+        ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' }),
         ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' }),
-        ha('sensor.sunsynk_optimizer_pv_total',            result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'PV forecast to peak (confidence-adjusted)' }),
-        ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'PV forecast to peak (p50)' }),
-        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage to peak' }),
+        ha('sensor.sunsynk_optimizer_pv_total',            result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (confidence-adjusted)' }),
+        ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (p50)' }),
+        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage over Agile horizon' }),
         ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' }),
         ha('sensor.sunsynk_optimizer_battery_to_fill',    result.batteryToFill,      { unit_of_measurement: 'Wh',     friendly_name: 'Battery grid import needed' }),
         ha('sensor.sunsynk_optimizer_battery_to_fill_no_pv', result.batteryToFillNoPV, { unit_of_measurement: 'Wh',  friendly_name: 'Battery grid import needed (no PV)' }),

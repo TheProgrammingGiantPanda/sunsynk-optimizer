@@ -30,7 +30,7 @@ options:
   battery_capacity_wh: 10000
   battery_fill_rate_wh: 2000
   avg_consumption_wh: 500
-  peak_hour: 16
+  expensive_threshold_pence: 25
   min_charge_floor_pence: 10
   forecast_confidence_factor: 0.3
   forecast_fetch_times: "06:00,12:00"
@@ -60,7 +60,7 @@ schema:
   battery_capacity_wh: int
   battery_fill_rate_wh: int
   avg_consumption_wh: int
-  peak_hour: int
+  expensive_threshold_pence: int
   min_charge_floor_pence: int
   forecast_confidence_factor: float
   forecast_fetch_times: str

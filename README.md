@@ -113,11 +113,11 @@ If configured, the optimizer builds a model of heat pump power vs outdoor temper
 |---|---|---|---|
 | `ha_ev_charger_entity` | `HA_EV_CHARGER_ENTITY` | `""` | EV charger power entity (kW). If the charger is actively drawing power, the optimizer projects the charge load from now to peak and adds it to house usage. |
 
-### Timing
+### Price thresholds
 
 | Option | Env var | Default | Description |
 |---|---|---|---|
-| `peak_hour` | `PEAK_HOUR` | `16` | Hour battery should be full by (local time, 24h). Typically the start of the Agile evening peak. |
+| `expensive_threshold_pence` | `EXPENSIVE_THRESHOLD_PENCE` | `25` | Slots at or above this price (p/kWh) are considered "expensive" — the battery should cover house load during these periods so you avoid importing at peak rates. Adjust to match your typical evening peak. |
 | `min_charge_floor_pence` | `MIN_CHARGE_FLOOR_PENCE` | `10` | Minimum price threshold (p/kWh). Set to `0` to allow the threshold to drop to zero. Set negative to capture negative-price slots even when the battery is full. |
 
 > **Note:** Passwords or API keys containing special characters (`#`, `&`, `!`) must be quoted in `.env`: `SUNSYNK_PASS="my#password"`
@@ -157,14 +157,14 @@ You should see output like:
 
 ```
 [optimizer] Starting Sunsynk Battery Optimizer
-[optimizer] Peak hour: 16:00
+[optimizer] Expensive threshold: 25p/kWh
 [optimizer] Authenticated with Sunsynk
 [optimizer] Using plant: My Home (id=414684)
 [optimizer] Fetching solar forecasts from Solcast (2 site(s))…
 [optimizer] Forecasts updated: 48 merged slots
 [optimizer] Fixed export rate: 15p/kWh
 [optimizer] Battery: 52.1V × 200Ah = 10420 Wh capacity, fill rate 2605 Wh/slot
-[calculator] Battery 65%, batteryToFill=3647 Wh, pvTotal=8200 Wh (p50=9100, adj=-9.9%), houseUsage=3500 Wh, surplus=4700 Wh, blocks=0, threshold=10p, eff=90%, exportRate=15p (break-even=13.5p, 6 import candidates)
+[calculator] Battery 65%, expensiveDemand=3647 Wh (4 slots ≥25p), batteryToFill=0 Wh, pvTotal=8200 Wh (p50=9100, adj=-9.9%), houseUsage=3500 Wh, surplus=4700 Wh, blocks=0, threshold=10p, eff=90%, exportRate=15p (break-even=13.5p, 6 import candidates)
 [2026-03-04T08:00:00.000Z] Set min charge threshold to 10p (battery 65%)
 [optimizer] HA sensors updated
 ```
@@ -208,10 +208,12 @@ After each price update the following sensors are written to Home Assistant:
 | Entity | Unit | Description |
 |---|---|---|
 | `sensor.sunsynk_optimizer_threshold` | p/kWh | Charge threshold set on Sunsynk |
+| `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
+| `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
 | `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |
-| `sensor.sunsynk_optimizer_pv_total` | Wh | PV forecast to peak (confidence-adjusted) |
-| `sensor.sunsynk_optimizer_pv_total_p50` | Wh | PV forecast to peak (raw p50, for comparison) |
-| `sensor.sunsynk_optimizer_house_usage` | Wh | Estimated house consumption to peak |
+| `sensor.sunsynk_optimizer_pv_total` | Wh | PV forecast over Agile horizon (confidence-adjusted) |
+| `sensor.sunsynk_optimizer_pv_total_p50` | Wh | PV forecast over Agile horizon (raw p50, for comparison) |
+| `sensor.sunsynk_optimizer_house_usage` | Wh | Estimated house consumption over Agile horizon |
 | `sensor.sunsynk_optimizer_battery_watts` | Wh | Current battery charge |
 | `sensor.sunsynk_optimizer_battery_to_fill` | Wh | Grid import needed (accounting for solar) |
 | `sensor.sunsynk_optimizer_battery_to_fill_no_pv` | Wh | Grid import needed (ignoring solar) |
@@ -234,9 +236,13 @@ After each price update the following sensors are written to Home Assistant:
 
 ## How the Algorithm Works
 
-### 1. Window
+### 1. Window and expensive slots
 
-All calculations run from now until `peak_hour` (e.g. 16:00), the period before the expensive evening peak. If peak hour has already passed today, the window extends to tomorrow's peak.
+All calculations use every available Agile rate (typically up to 24–36 h ahead). The horizon is bounded naturally by how far Octopus publishes prices.
+
+Agile slots are split into two groups based on `expensive_threshold_pence`:
+- **Expensive** (≥ threshold): the battery must cover house load; grid import is avoided.
+- **Cheap** (< threshold): grid import is acceptable; these are candidates for cheap charging.
 
 ### 2. PV forecast
 
@@ -250,14 +256,15 @@ A per-slot consumption profile is built from `consumption_average_days` of HA hi
 
 If an EV charger entity is configured and the charger is actively drawing power, the optimizer projects `chargePower × hoursTopeak` Wh as additional house load. This conservatively assumes charging continues at the current rate until peak.
 
-### 5. Surplus and battery to fill
+### 5. Battery demand and grid import needed
 
 ```
-surplus          = pvTotal − houseUsage
-batteryToFill    = capacity − currentCharge − max(surplus, 0)
+totalExpensiveDemand = Σ max(0, houseLoad − pvGeneration) over expensive slots
+pvSurplusCheap       = Σ max(0, pvGeneration − houseLoad) over cheap slots
+batteryToFill        = max(0, totalExpensiveDemand − currentBattery − pvSurplusCheap × eff)
 ```
 
-If solar will more than cover house usage, the surplus reduces how much grid import is needed. A negative surplus (more house usage than solar) increases the amount needed.
+PV during expensive slots offsets demand directly (reducing how much battery is needed). PV surplus during cheap slots pre-charges the battery for free, reducing the grid import needed, adjusted by round-trip efficiency.
 
 ### 6. Charging blocks
 
