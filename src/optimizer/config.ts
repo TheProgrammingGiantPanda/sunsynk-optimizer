@@ -31,6 +31,7 @@ export interface Config {
   octopusExportProduct: string;       // e.g. "OUTGOING-AGILE-BB-23-02-28" (optional)
   octopusExportTariff: string;        // e.g. "E-1R-OUTGOING-AGILE-BB-23-02-28-G" (optional)
   batteryRoundTripEfficiency: number; // 0–1; fraction of imported Wh recoverable on discharge (default 0.9)
+  minDischargeSoc: number;            // % — minimum battery SoC before selling stops (limitSoc on direction=0)
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -69,6 +70,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     octopusExportProduct: String(o['octopus_export_product'] ?? ''),
     octopusExportTariff: String(o['octopus_export_tariff'] ?? ''),
     batteryRoundTripEfficiency: Number(o['battery_round_trip_efficiency'] ?? 0.9),
+    minDischargeSoc: Number(o['min_discharge_soc'] ?? 20),
   };
 }
 
@@ -111,5 +113,6 @@ export function loadConfig(): Config {
     octopus_export_product: process.env.OCTOPUS_EXPORT_PRODUCT,
     octopus_export_tariff: process.env.OCTOPUS_EXPORT_TARIFF,
     battery_round_trip_efficiency: process.env.BATTERY_ROUND_TRIP_EFFICIENCY,
+    min_discharge_soc: process.env.MIN_DISCHARGE_SOC,
   });
 }

@@ -130,7 +130,7 @@ export default class SunsyncClient {
     plantId: string | number,
     minPricePence: number | string,
     sellThreshold?: number,   // undefined = don't touch; 0 = disable (set 9999); >0 = enable at this price
-    options: { token?: string } = {}
+    options: { token?: string; limitSoc?: number } = {}
   ): Promise<any> {
     const token = options.token || this.token;
     if (!token)
@@ -154,18 +154,21 @@ export default class SunsyncClient {
       console.warn('[optimizer] direction=1 product not found in plant — charge threshold not set');
     }
 
-    // Update ratesThreshold for direction=0 (Dis-Charge Battery — sell price threshold).
-    // Only update when export is configured (sellThreshold !== undefined).
-    // 999 effectively disables selling (Agile never reaches that price); a real value enables it.
-    if (sellThreshold !== undefined) {
-      const sellThresholdStr = sellThreshold > 0 ? String(sellThreshold) : '999';
-      const dir0Idx = updatedProducts.findIndex((p: any) => p.direction === 0);
-      if (dir0Idx >= 0) {
-        updatedProducts[dir0Idx] = { ...updatedProducts[dir0Idx], ratesThreshold: sellThresholdStr };
-        console.log(`[optimizer] Sell threshold → ${sellThresholdStr}p (direction=0)`);
-      } else {
-        console.warn('[optimizer] direction=0 product not found in plant — sell threshold not set');
+    // Update direction=0 (Dis-Charge Battery): always write limitSoc to protect battery health;
+    // also update ratesThreshold when export is configured.
+    // 999p effectively disables selling (Agile never reaches that price); a real value enables it.
+    const dir0Idx = updatedProducts.findIndex((p: any) => p.direction === 0);
+    if (dir0Idx >= 0) {
+      const limitSoc = options.limitSoc ?? 20;
+      const dir0Updates: any = { limitSoc };
+      if (sellThreshold !== undefined) {
+        const sellThresholdStr = sellThreshold > 0 ? String(sellThreshold) : '999';
+        dir0Updates.ratesThreshold = sellThresholdStr;
+        console.log(`[optimizer] Sell threshold → ${sellThresholdStr}p, limitSoc=${limitSoc}% (direction=0)`);
       }
+      updatedProducts[dir0Idx] = { ...updatedProducts[dir0Idx], ...dir0Updates };
+    } else {
+      console.warn('[optimizer] direction=0 product not found in plant — dis-charge settings not updated');
     }
 
     // Strip server-generated fields from charges

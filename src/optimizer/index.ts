@@ -61,6 +61,7 @@ async function main() {
   let dailySavingVsPeakPence = 0;
   let dailySavingVsStandardPence = 0;
   let dailyPvSavingPence = 0;
+  let dailyExportIncomePence = 0;
   let slotProfile: number[] | undefined;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
@@ -260,17 +261,19 @@ async function main() {
       dailySavingVsPeakPence = 0;
       dailySavingVsStandardPence = 0;
       dailyPvSavingPence = 0;
+      dailyExportIncomePence = 0;
       savingDate = today;
     }
     dailySavingVsPeakPence     += result.savingVsPeakPence;
     dailySavingVsStandardPence += result.savingVsStandardPence;
     dailyPvSavingPence         += result.pvSavingPence;
+    if (result.sellThreshold > 0) dailyExportIncomePence += result.exportIncomePence;
 
     try {
       // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
       // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
       const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
-      await client.setMinCharge(plantId, result.threshold, exportConfigured ? result.sellThreshold : undefined);
+      await client.setMinCharge(plantId, result.threshold, exportConfigured ? result.sellThreshold : undefined, { limitSoc: config.minDischargeSoc });
       console.log(`[optimizer] Set min charge threshold to ${result.threshold}p (battery ${batteryPct}%)`);
       dismissNotification(config.haUrl, config.haToken).catch(() => {});
     } catch (err) {
@@ -305,6 +308,7 @@ async function main() {
         ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(dailySavingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
         ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(dailySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
         ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
+        ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(dailyExportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' }),
         ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
         ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
         ...(result.exportableWh > 0 ? [ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh', friendly_name: 'Energy available to sell to grid' })] : []),
