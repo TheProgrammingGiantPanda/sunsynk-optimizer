@@ -5,7 +5,8 @@ import { PriceSlot } from './octopus';
 export interface CalculationResult {
   threshold: number;         // pence — value set on Sunsynk
   lowestPrice: number;       // £/kWh — cheapest Agile slot in window
-  pvTotal: number;           // Wh — combined PV forecast to peak
+  pvTotal: number;           // Wh — confidence-adjusted PV forecast to peak
+  pvTotalP50: number;        // Wh — unadjusted p50 PV forecast (for comparison)
   houseUsage: number;        // Wh — estimated house consumption to peak
   batteryWatts: number;      // Wh — current battery charge
   batteryToFill: number;     // Wh — grid import needed (accounting for solar)
@@ -44,7 +45,22 @@ export function calculate(
   // Solcast pv_estimate is in kW for a 30-min period → convert to Wh: * 500
   const WH_PER_KW_HALF_HOUR = 500;
 
+  // Confidence-weighted estimate: on uncertain days (wide p10–p90 band) lean
+  // towards p10 proportionally; on clear days (tight band) stay near p50.
+  // factor=0 → always p50, factor=1 → p10 on maximally uncertain days.
+  function adjustedEstimate(slot: ForecastSlot): number {
+    const f = config.forecastConfidenceFactor;
+    if (f === 0) return slot.pv_estimate;
+    const p50 = slot.pv_estimate;
+    const p10 = slot.pv_estimate10;
+    const p90 = slot.pv_estimate90;
+    const spread = p50 > 0 ? (p90 - p10) / p50 : 0;
+    const alpha = Math.min(f * spread, 1);
+    return Math.max(0, p50 - alpha * (p50 - p10));
+  }
+
   let pvTotal = 0;
+  let pvTotalP50 = 0;
   let houseUsage = 0;
 
   function slotConsumption(slotEnd: Date): number {
@@ -57,8 +73,9 @@ export function calculate(
   for (const slot of pvForecasts) {
     const slotEnd = new Date(slot.period_end);
     if (slotEnd <= now || slotEnd > peakTime) continue;
-    pvTotal += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
-    houseUsage += slotConsumption(slotEnd);
+    pvTotal     += adjustedEstimate(slot) * WH_PER_KW_HALF_HOUR;
+    pvTotalP50  += slot.pv_estimate       * WH_PER_KW_HALF_HOUR;
+    houseUsage  += slotConsumption(slotEnd);
   }
 
   // ── 2. How much battery capacity remains to be filled? ───────────────────
@@ -98,16 +115,22 @@ export function calculate(
     threshold = Math.max(Math.ceil(windowRates[idx].value_inc_vat), config.minChargeFloorPence);
   }
 
+  const confidenceAdj = pvTotalP50 > 0
+    ? ((pvTotal - pvTotalP50) / pvTotalP50 * 100).toFixed(1)
+    : '0.0';
+
   console.log(
     `[calculator] Battery ${batteryPct}%, batteryToFill=${batteryToFill.toFixed(0)} Wh, ` +
-    `pvTotal=${pvTotal.toFixed(0)} Wh, houseUsage=${houseUsage.toFixed(0)} Wh, ` +
-    `surplus=${surplus.toFixed(0)} Wh, blocks=${blocks}, threshold=${threshold}p`
+    `pvTotal=${pvTotal.toFixed(0)} Wh (p50=${pvTotalP50.toFixed(0)}, adj=${confidenceAdj}%), ` +
+    `houseUsage=${houseUsage.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh, ` +
+    `blocks=${blocks}, threshold=${threshold}p`
   );
 
   return {
     threshold,
     lowestPrice,
     pvTotal: Math.floor(pvTotal),
+    pvTotalP50: Math.floor(pvTotalP50),
     houseUsage: Math.floor(houseUsage),
     batteryWatts: Math.floor(batteryWatts),
     batteryToFill: Math.floor(batteryToFill),

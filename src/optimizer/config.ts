@@ -21,6 +21,7 @@ export interface Config {
   avgConsumptionWh: number;
   peakHour: number;
   minChargeFloorPence: number;
+  forecastConfidenceFactor: number;
   forecastFetchTimes: string[];
   priceIntervalMinutes: number;
   haHeatPumpEntity: string;
@@ -51,6 +52,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     avgConsumptionWh: Number(o['avg_consumption_wh'] ?? 500),
     peakHour: Number(o['peak_hour'] ?? 16),
     minChargeFloorPence: Number(o['min_charge_floor_pence'] ?? 10),
+    forecastConfidenceFactor: Number(o['forecast_confidence_factor'] ?? 0.3),
     forecastFetchTimes: String(o['forecast_fetch_times'] ?? '06:00,12:00')
       .split(',')
       .map(t => t.trim()),
@@ -89,6 +91,7 @@ export function loadConfig(): Config {
     avg_consumption_wh: process.env.AVG_CONSUMPTION_WH,
     peak_hour: process.env.PEAK_HOUR,
     min_charge_floor_pence: process.env.MIN_CHARGE_FLOOR_PENCE,
+    forecast_confidence_factor: process.env.FORECAST_CONFIDENCE_FACTOR,
     forecast_fetch_times: process.env.FORECAST_FETCH_TIMES,
     price_interval_minutes: process.env.PRICE_INTERVAL_MINUTES,
     ha_heat_pump_entity: process.env.HA_HEAT_PUMP_ENTITY,

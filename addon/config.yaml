@@ -32,6 +32,7 @@ options:
   avg_consumption_wh: 500
   peak_hour: 16
   min_charge_floor_pence: 10
+  forecast_confidence_factor: 0.3
   forecast_fetch_times: "06:00,12:00"
   price_interval_minutes: 30
   ha_heat_pump_entity: "sensor.main_heat_pump_total_electricity_consumption_kwh"
@@ -56,6 +57,7 @@ schema:
   avg_consumption_wh: int
   peak_hour: int
   min_charge_floor_pence: int
+  forecast_confidence_factor: float
   forecast_fetch_times: str
   price_interval_minutes: int
   ha_heat_pump_entity: str

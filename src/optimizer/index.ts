@@ -163,7 +163,8 @@ async function main() {
       await Promise.all([
         ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' }),
         ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' }),
-        ha('sensor.sunsynk_optimizer_pv_total',           result.pvTotal,            { unit_of_measurement: 'Wh',     friendly_name: 'PV total forecast to peak' }),
+        ha('sensor.sunsynk_optimizer_pv_total',            result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'PV forecast to peak (confidence-adjusted)' }),
+        ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'PV forecast to peak (p50)' }),
         ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage to peak' }),
         ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' }),
         ha('sensor.sunsynk_optimizer_battery_to_fill',    result.batteryToFill,      { unit_of_measurement: 'Wh',     friendly_name: 'Battery grid import needed' }),
