@@ -229,6 +229,8 @@ After each price update the following sensors are written to Home Assistant:
 | `sensor.sunsynk_optimizer_export_rate` | p/kWh | Effective export rate in use (only present when configured) |
 | `sensor.sunsynk_optimizer_exportable_wh` | Wh | Energy available to sell to grid (only present when genuine surplus exists) |
 | `sensor.sunsynk_optimizer_sell_threshold` | p/kWh | Sell-to-grid threshold set on Sunsynk (only present when selling is active) |
+| `sensor.sunsynk_optimizer_export_slot_count` | — | Number of upcoming slots planned for battery export (only present when > 0) |
+| `sensor.sunsynk_optimizer_export_income` | p | Expected income from planned battery-to-grid sales (only present when > 0) |
 | `sensor.sunsynk_optimizer_hp_adjustment` | Wh | Heat pump load adjustment vs historical (only present when configured) |
 | `sensor.sunsynk_optimizer_slot_profile` | Wh | Total daily consumption profile (only present when HA history available) |
 

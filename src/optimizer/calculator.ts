@@ -26,6 +26,8 @@ export interface CalculationResult {
   sellThreshold: number;           // price above which Sunsynk should sell (0 = disabled)
   expensiveSlots: number;          // count of upcoming expensive slots (≥ expensiveThresholdPence)
   totalExpensiveDemandWh: number;  // Wh the battery needs to cover during expensive slots
+  exportSlotCount: number;         // number of upcoming slots planned for battery export
+  exportIncomePence: number;       // expected income from planned battery-to-grid sales
 }
 
 // ── Module-scope constants and pure helpers ──────────────────────────────────
@@ -100,7 +102,8 @@ export function calculate(
   slotProfile?: number[],      // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
   hpAdjustment?: number[],     // 48-element Wh adjustment for heat pump temperature deviation
   evLoadWh = 0,                // estimated EV charge energy to add to house load (Wh)
-  exportRatePence = 0          // effective export rate (pence/kWh); slots above this are skipped
+  exportRatePence = 0,         // effective export rate (pence/kWh); used for import break-even filter
+  exportRates?: PriceSlot[]    // full future export rate schedule; used to plan export slots
 ): CalculationResult {
   const now = new Date();
   const eff = Math.max(0.5, Math.min(1, config.batteryRoundTripEfficiency ?? 0.9));
@@ -210,15 +213,38 @@ export function calculate(
     (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
   );
 
-  // ── 8. Sell-to-grid threshold ─────────────────────────────────────────────
+  // ── 8. Sell-to-grid planning ──────────────────────────────────────────────
   // Exportable = battery charge above what expensive periods need
   const exportableWh = Math.max(0, Math.floor(batteryWatts - totalExpensiveDemandWh));
   const breakEvenSell = windowRates.length > 0
     ? windowRates[0].value_inc_vat / eff
     : Infinity;
-  const sellThreshold = (exportableWh > 0 && exportRatePence > 0 && exportRatePence > breakEvenSell)
-    ? Math.ceil(breakEvenSell)
+
+  // Use the full export rate schedule to identify the best slots to sell during.
+  // Sort descending — pick the most profitable slots first, up to exportableWh capacity.
+  const futureExportRates = (exportRates ?? [])
+    .filter(r => new Date(r.valid_to) > now && r.value_inc_vat > breakEvenSell)
+    .sort((a, b) => b.value_inc_vat - a.value_inc_vat);
+
+  const exportSlotsNeeded = exportableWh > 0
+    ? Math.ceil(exportableWh / (config.batteryFillRateWh * eff))
     : 0;
+  const plannedExportSlots = futureExportRates.slice(0, exportSlotsNeeded);
+  const exportIncomePence = plannedExportSlots.reduce(
+    (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
+  );
+  const exportSlotCount = plannedExportSlots.length;
+
+  // Sell threshold: minimum price of planned export slots → Sunsynk sells during those slots only.
+  // Falls back to break-even approach when no future schedule is available.
+  let sellThreshold: number;
+  if (plannedExportSlots.length > 0) {
+    sellThreshold = Math.ceil(plannedExportSlots[plannedExportSlots.length - 1].value_inc_vat);
+  } else if (exportableWh > 0 && exportRatePence > 0 && exportRatePence > breakEvenSell) {
+    sellThreshold = Math.ceil(breakEvenSell);
+  } else {
+    sellThreshold = 0;
+  }
 
   // ── Logging ───────────────────────────────────────────────────────────────
   const confidenceAdj = pvTotalP50 > 0
@@ -233,7 +259,7 @@ export function calculate(
     `houseUsage=${houseUsage.toFixed(0)} Wh, surplus=${surplus.toFixed(0)} Wh, ` +
     `blocks=${blocks}, threshold=${threshold}p, eff=${(eff * 100).toFixed(0)}%` +
     (exportRatePence > 0 ? `, exportRate=${exportRatePence}p (break-even=${(exportRatePence * eff).toFixed(1)}p, ${importCandidates.length} import candidates)` : '') +
-    (sellThreshold > 0 ? `, sell=${sellThreshold}p (exportable=${exportableWh} Wh)` : '')
+    (sellThreshold > 0 ? `, sell=${sellThreshold}p (exportable=${exportableWh} Wh, ${exportSlotCount} slot(s), income=${exportIncomePence.toFixed(1)}p)` : '')
   );
 
   return {
@@ -260,5 +286,7 @@ export function calculate(
     sellThreshold,
     expensiveSlots: expensiveRates.length,
     totalExpensiveDemandWh: Math.floor(totalExpensiveDemandWh),
+    exportSlotCount,
+    exportIncomePence: Math.round(exportIncomePence * 10) / 10,
   };
 }

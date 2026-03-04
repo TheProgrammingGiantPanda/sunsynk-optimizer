@@ -1,7 +1,8 @@
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
 import { getMergedForecast, loadForecastCache, ForecastSlot } from './solcast';
-import { getAgileRates, getFixedExportRate, getOutgoingAgileRate } from './octopus';
+import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octopus';
+import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
@@ -62,13 +63,26 @@ async function main() {
   let hpModel: HeatPumpModel | null = null;
 
   // Forecast + consumption fetcher
-  const fetchForecasts = async () => {
-    console.log(`[optimizer] Fetching solar forecasts from Solcast (${config.solcastSites.length} site(s))…`);
-    try {
-      pvForecasts = await getMergedForecast(config.solcastSites, config.solcastApiKey);
-      console.log(`[optimizer] Forecasts updated: ${pvForecasts.length} merged slots`);
-    } catch (err) {
-      console.error('[optimizer] Forecast fetch failed:', err);
+  // useCache: skip Solcast API call if a fresh cache already exists (used on startup to avoid
+  // burning the hobbyist quota every time the service restarts)
+  const fetchForecasts = async (useCache = false) => {
+    let solcastFetched = false;
+    if (useCache) {
+      const cached = loadForecastCache();
+      if (cached) {
+        pvForecasts = cached;
+        console.log(`[optimizer] Solar forecast loaded from cache (${pvForecasts.length} slots) — skipping Solcast API call`);
+        solcastFetched = true;
+      }
+    }
+    if (!solcastFetched) {
+      console.log(`[optimizer] Fetching solar forecasts from Solcast (${config.solcastSites.length} site(s))…`);
+      try {
+        pvForecasts = await getMergedForecast(config.solcastSites, config.solcastApiKey);
+        console.log(`[optimizer] Forecasts updated: ${pvForecasts.length} merged slots`);
+      } catch (err) {
+        console.error('[optimizer] Forecast fetch failed:', err);
+      }
     }
 
     try {
@@ -100,8 +114,10 @@ async function main() {
     }
   };
 
-  // Schedule forecast fetches at configured times, and fetch once on start
-  scheduleDailyTimes(config.forecastFetchTimes, fetchForecasts, true);
+  // Startup: use cache if fresh (avoids Solcast API call on every restart)
+  fetchForecasts(true).catch(err => console.error('[optimizer] Initial forecast error:', err));
+  // Scheduled fetches (e.g. 06:00, 12:00): always pull fresh data from Solcast
+  scheduleDailyTimes(config.forecastFetchTimes, fetchForecasts, false);
 
   // Price update loop — aligned to Agile half-hour boundaries (:02 and :32)
   scheduleAgileAligned(async () => {
@@ -155,15 +171,23 @@ async function main() {
       return;
     }
 
-    // Resolve effective export rate: Outgoing Agile > fixed schedule > 0
+    // Resolve effective export rate: Outgoing Agile schedule > fixed schedule > 0
     let exportRatePence = 0;
+    let exportRates: PriceSlot[] = [];
     if (config.octopusExportProduct && config.octopusExportTariff) {
-      const agileExport = await getOutgoingAgileRate(config.octopusExportProduct, config.octopusExportTariff);
-      if (agileExport !== null) {
-        exportRatePence = agileExport;
-        console.log(`[optimizer] Outgoing Agile export rate: ${exportRatePence.toFixed(2)}p/kWh`);
+      const fetchedExportRates = await getOutgoingAgileRates(config.octopusExportProduct, config.octopusExportTariff);
+      if (fetchedExportRates.length > 0) {
+        exportRates = fetchedExportRates;
+        const now = new Date();
+        const currentSlot = fetchedExportRates.find(s =>
+          new Date(s.valid_from) <= now && new Date(s.valid_to) > now
+        );
+        if (currentSlot) {
+          exportRatePence = currentSlot.value_inc_vat;
+          console.log(`[optimizer] Outgoing Agile export rate: ${exportRatePence.toFixed(2)}p/kWh (${fetchedExportRates.length} future slots)`);
+        }
       } else {
-        console.warn('[optimizer] Failed to get Outgoing Agile rate, falling back to fixed schedule');
+        console.warn('[optimizer] Failed to get Outgoing Agile rates, falling back to fixed schedule');
       }
     }
     if (exportRatePence === 0 && config.exportTariffSchedule) {
@@ -171,6 +195,12 @@ async function main() {
       if (exportRatePence > 0) {
         console.log(`[optimizer] Fixed export rate: ${exportRatePence}p/kWh`);
       }
+    }
+
+    // For fixed export tariffs, synthesise a slot schedule at the fixed rate so the
+    // export planning logic (slot selection, income, sell threshold) works the same way.
+    if (exportRates.length === 0 && exportRatePence > 0) {
+      exportRates = rates.map(r => ({ ...r, value_exc_vat: exportRatePence / 1.05, value_inc_vat: exportRatePence }));
     }
 
     // Compute heat pump adjustment based on weather forecast temperature
@@ -219,7 +249,7 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh, exportRatePence);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -276,6 +306,8 @@ async function main() {
         ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
         ...(result.exportableWh > 0 ? [ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh', friendly_name: 'Energy available to sell to grid' })] : []),
         ...(result.sellThreshold > 0 ? [ha('sensor.sunsynk_optimizer_sell_threshold', result.sellThreshold, { unit_of_measurement: 'p/kWh', friendly_name: 'Sell-to-grid threshold' })] : []),
+        ...(result.exportSlotCount > 0 ? [ha('sensor.sunsynk_optimizer_export_slot_count', result.exportSlotCount, { friendly_name: 'Planned export slots' })] : []),
+        ...(result.exportIncomePence > 0 ? [ha('sensor.sunsynk_optimizer_export_income', result.exportIncomePence, { unit_of_measurement: 'p', friendly_name: 'Expected export income' })] : []),
         ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }

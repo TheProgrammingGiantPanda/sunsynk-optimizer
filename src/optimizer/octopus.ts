@@ -50,6 +50,26 @@ export async function getAgileRates(
 }
 
 /**
+ * Fetch the full Outgoing Agile export rate schedule (pence/kWh half-hourly slots).
+ * Returns an empty array if the fetch fails — callers should handle gracefully.
+ */
+export async function getOutgoingAgileRates(
+  product: string,
+  tariff: string
+): Promise<PriceSlot[]> {
+  const url = `https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`;
+  try {
+    return await withRetry(
+      () => axios.get(url, { params: { page_size: 192 }, headers: { Accept: 'application/json' }, timeout: 15000 })
+        .then(res => res.data?.results ?? []),
+      { label: 'Outgoing Agile export rates' }
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch Outgoing Agile export rates and return the current slot's rate (pence/kWh).
  * Returns null if the fetch fails or no current slot is found.
  */
@@ -58,17 +78,7 @@ export async function getOutgoingAgileRate(
   tariff: string,
   date: Date = new Date()
 ): Promise<number | null> {
-  const url = `https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`;
-  let slots: PriceSlot[];
-  try {
-    slots = await withRetry(
-      () => axios.get(url, { params: { page_size: 48 }, headers: { Accept: 'application/json' }, timeout: 15000 })
-        .then(res => res.data?.results ?? []),
-      { label: 'Outgoing Agile export rates' }
-    );
-  } catch {
-    return null;
-  }
+  const slots = await getOutgoingAgileRates(product, tariff);
   const current = slots.find(s => {
     const from = new Date(s.valid_from);
     const to   = new Date(s.valid_to);

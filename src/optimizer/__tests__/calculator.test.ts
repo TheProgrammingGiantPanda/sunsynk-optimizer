@@ -292,6 +292,57 @@ describe('calculate — sell threshold', () => {
     expect(result.exportableWh).toBe(7000);
     expect(result.totalExpensiveDemandWh).toBe(3000);
   });
+
+  it('exportSlotCount and exportIncomePence are 0 when no exportRates provided', () => {
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20);
+    expect(result.exportSlotCount).toBe(0);
+    expect(result.exportIncomePence).toBe(0);
+    // Falls back to break-even threshold
+    expect(result.sellThreshold).toBe(10); // ceil(10/1.0) = 10
+  });
+
+  it('sellThreshold targets the Nth most profitable export slot (not just break-even)', () => {
+    // battery=100%, exportable=7000 Wh → 3 slots to export (ceil(7000/2500)=3)
+    // Export rates above break-even (10p): [30p, 25p, 20p, 15p, 12p] sorted desc
+    // Top 3 are 30p, 25p, 20p → threshold = ceil(20) = 20
+    const exportRates = [
+      priceSlot(1, 12), priceSlot(2, 25), priceSlot(3, 30), priceSlot(4, 20), priceSlot(5, 15),
+    ];
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
+    expect(result.exportSlotCount).toBe(3);
+    expect(result.sellThreshold).toBe(20); // lowest of the 3 planned slots (20p)
+  });
+
+  it('exportIncomePence = sum of planned slot prices × fillRate/1000', () => {
+    // 3 slots planned: 30p, 25p, 20p each × (2500/1000) = 2.5 kWh
+    // income = (30 + 25 + 20) × 2.5 = 187.5p
+    const exportRates = [
+      priceSlot(1, 12), priceSlot(2, 25), priceSlot(3, 30), priceSlot(4, 20), priceSlot(5, 15),
+    ];
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
+    expect(result.exportIncomePence).toBeCloseTo(187.5, 1);
+  });
+
+  it('excludes export slots at or below break-even', () => {
+    // break-even = cheapest import / eff = 10p / 1.0 = 10p
+    // export slots at [10p, 9p, 8p] are all ≤ break-even → not profitable
+    const exportRates = [priceSlot(1, 8), priceSlot(2, 9), priceSlot(3, 10)];
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
+    expect(result.exportSlotCount).toBe(0);
+    expect(result.exportIncomePence).toBe(0);
+    expect(result.sellThreshold).toBe(10); // fallback to break-even
+  });
+
+  it('caps export slots at exportableWh capacity', () => {
+    // exportable=7000 Wh → 3 slots needed; 5 export slots available above break-even
+    // Only the top 3 (most profitable) are selected
+    const exportRates = [
+      priceSlot(1, 50), priceSlot(2, 40), priceSlot(3, 35), priceSlot(4, 28), priceSlot(5, 22),
+    ];
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
+    expect(result.exportSlotCount).toBe(3);     // capped at ceil(7000/2500)
+    expect(result.sellThreshold).toBe(35);      // lowest of top-3: 50,40,35
+  });
 });
 
 // ── Horizon extends to all available Agile data ───────────────────────────────
