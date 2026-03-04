@@ -108,11 +108,30 @@ When an export rate is configured, the optimizer only imports grid energy cheape
 
 ### Heat pump (optional)
 
-If configured, the optimizer builds a model of heat pump power vs outdoor temperature and adjusts expected consumption up or down based on today's weather forecast.
+If configured, the optimizer builds a temperature-based model of heat pump energy consumption and uses it to adjust today's expected load based on the weather forecast.
+
+**How it works:**
+
+1. HA history is read for both the HP energy sensor and the outdoor temperature sensor over the last `consumption_average_days` days.
+2. Per-day HP energy (kWh) is paired with average daily outdoor temperature (°C).
+3. A linear regression is fitted: `HP_kWh = intercept + slope × temp°C`. Colder days → more HP usage; warmer days → less.
+4. At each price update, today's weather forecast is fetched from Open-Meteo (no API key needed) and the average temperature over the Agile horizon is computed.
+5. The model predicts today's HP energy from that forecast temperature, and the per-slot HP profile is scaled up or down proportionally relative to the historical average.
+
+This means if today is colder than the historical average the optimizer will buy more cheap grid slots to cover the extra HP load, and vice versa.
+
+When working correctly you will see lines like this in the logs:
+
+```
+[heatpump] Model from 8 days: HP = 12.40 + -0.610 × temp°C (avg 7.2°C → 14.1 kWh/day)
+[heatpump] Forecast avg 4.3°C → predicted 16.0 kWh/day (historical 14.1 kWh/day, ratio 1.13)
+```
+
+A ratio above 1.0 means the optimizer expects more HP usage than historical average and will plan to buy additional slots accordingly.
 
 | Option | Env var | Default | Description |
 |---|---|---|---|
-| `ha_heat_pump_entity` | `HA_HEAT_PUMP_ENTITY` | `""` | Heat pump energy entity (kWh daily, e.g. from Homely/Vaillant integration) |
+| `ha_heat_pump_entity` | `HA_HEAT_PUMP_ENTITY` | `""` | Heat pump energy entity (cumulative lifetime kWh, e.g. from Homely/Vaillant integration) |
 | `ha_outdoor_temp_entity` | `HA_OUTDOOR_TEMP_ENTITY` | `""` | Outdoor temperature entity (°C) — used to correlate heat pump load with temperature |
 
 ### EV charging (optional)
@@ -365,7 +384,7 @@ If `ha_pv_daily_entity` is configured, forecast accuracy is tracked daily. When 
 
 A per-slot consumption profile is built from `consumption_average_days` of HA history. The per-slot average is also derived from history and used as a fallback when the full profile is unavailable; `avg_consumption_wh` is only used as a last resort if HA history is unreachable.
 
-If a heat pump entity is configured, expected consumption is adjusted up or down based on how today's forecast temperature differs from the historical average for each slot.
+If a heat pump entity is configured, a linear regression model is built from `consumption_average_days` of HA history correlating HP daily energy (kWh) with average outdoor temperature. At each price update today's weather forecast (Open-Meteo) is used to predict HP usage, and the per-slot HP profile is scaled by `predictedKwh / historicalAvgKwh`. The resulting delta is added to the house load estimate slot by slot.
 
 ### 4. Dynamic minimum SoC
 
