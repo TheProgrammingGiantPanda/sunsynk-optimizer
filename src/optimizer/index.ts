@@ -99,6 +99,10 @@ async function main() {
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
 
+  // Last values sent to Sunsynk — skip API call when unchanged
+  let lastThreshold: number | null = null;
+  let lastSellThreshold: number | null = null;
+
   // Forecast + consumption fetcher
   // useCache: skip Solcast API call if a fresh cache already exists (used on startup to avoid
   // burning the hobbyist quota every time the service restarts)
@@ -299,19 +303,26 @@ async function main() {
     if (result.sellThreshold > 0) accumulators.exportIncomePence += result.exportIncomePence;
     saveAccumulators(accumulators);
 
-    try {
-      // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
-      // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
-      const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
-      await client.setMinCharge(plantId, result.threshold, exportConfigured ? result.sellThreshold : undefined, { limitSoc: config.minDischargeSoc });
-      console.log(`[optimizer] Set min charge threshold to ${result.threshold}p (battery ${batteryPct}%)`);
-      dismissNotification(config.haUrl, config.haToken).catch(() => {});
-    } catch (err) {
-      console.error('[optimizer] Failed to set min charge:', err);
-      createNotification(config.haUrl, config.haToken,
-        'Sunsynk Optimizer — failed to set charge threshold',
-        `Failed to set min charge threshold at ${new Date().toISOString()}.\n\n${err}`
-      ).catch(() => {});
+    const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
+    const effectiveSellThreshold = exportConfigured ? result.sellThreshold : undefined;
+    if (result.threshold === lastThreshold && effectiveSellThreshold === lastSellThreshold) {
+      console.log(`[optimizer] Threshold unchanged (${result.threshold}p / sell ${effectiveSellThreshold ?? 'n/a'}p) — skipping Sunsynk update`);
+    } else {
+      try {
+        // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
+        // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
+        await client.setMinCharge(plantId, result.threshold, effectiveSellThreshold, { limitSoc: config.minDischargeSoc });
+        console.log(`[optimizer] Set min charge threshold to ${result.threshold}p (battery ${batteryPct}%)`);
+        lastThreshold = result.threshold;
+        lastSellThreshold = effectiveSellThreshold ?? null;
+        dismissNotification(config.haUrl, config.haToken).catch(() => {});
+      } catch (err) {
+        console.error('[optimizer] Failed to set min charge:', err);
+        createNotification(config.haUrl, config.haToken,
+          'Sunsynk Optimizer — failed to set charge threshold',
+          `Failed to set min charge threshold at ${new Date().toISOString()}.\n\n${err}`
+        ).catch(() => {});
+      }
     }
 
     // Push results to HA sensors
