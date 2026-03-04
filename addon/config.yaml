@@ -24,8 +24,7 @@ options:
   ha_load_daily_entity: "sensor.solarsynkv3_2310140043_load_daily_used"
   consumption_average_days: 7
   solcast_api_key: ""
-  solcast_site_pv1: ""
-  solcast_site_pv2: ""
+  solcast_sites: ""
   octopus_product: "AGILE-24-04-03"
   octopus_tariff: "E-1R-AGILE-24-04-03-G"
   battery_capacity_wh: 10000
@@ -49,8 +48,7 @@ schema:
   ha_load_daily_entity: str
   consumption_average_days: int
   solcast_api_key: password
-  solcast_site_pv1: str
-  solcast_site_pv2: str
+  solcast_sites: str
   octopus_product: str
   octopus_tariff: str
   battery_capacity_wh: int

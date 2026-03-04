@@ -5,8 +5,6 @@ import { PriceSlot } from './octopus';
 export interface CalculationResult {
   threshold: number;         // pence — value set on Sunsynk
   lowestPrice: number;       // £/kWh — cheapest Agile slot in window
-  pv1Total: number;          // Wh — PV array 1 forecast to peak
-  pv2Total: number;          // Wh — PV array 2 forecast to peak
   pvTotal: number;           // Wh — combined PV forecast to peak
   houseUsage: number;        // Wh — estimated house consumption to peak
   batteryWatts: number;      // Wh — current battery charge
@@ -28,8 +26,7 @@ export interface CalculationResult {
 export function calculate(
   config: Config,
   batteryPct: number,
-  pv1Forecasts: ForecastSlot[],
-  pv2Forecasts: ForecastSlot[],
+  pvForecasts: ForecastSlot[],
   agileRates: PriceSlot[],
   slotProfile?: number[],      // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
   hpAdjustment?: number[]      // 48-element Wh adjustment for heat pump temperature deviation
@@ -47,14 +44,8 @@ export function calculate(
   // Solcast pv_estimate is in kW for a 30-min period → convert to Wh: * 500
   const WH_PER_KW_HALF_HOUR = 500;
 
-  let pv1Total = 0;
-  let pv2Total = 0;
+  let pvTotal = 0;
   let houseUsage = 0;
-
-  const pv2Map = new Map<string, number>();
-  for (const slot of pv2Forecasts) {
-    pv2Map.set(slot.period_end, slot.pv_estimate);
-  }
 
   function slotConsumption(slotEnd: Date): number {
     const idx = slotEnd.getUTCHours() * 2 + Math.floor(slotEnd.getUTCMinutes() / 30);
@@ -63,25 +54,12 @@ export function calculate(
     return Math.max(0, base + hpDelta);
   }
 
-  for (const slot of pv1Forecasts) {
+  for (const slot of pvForecasts) {
     const slotEnd = new Date(slot.period_end);
     if (slotEnd <= now || slotEnd > peakTime) continue;
-    pv1Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
-    pv2Total += (pv2Map.get(slot.period_end) ?? 0) * WH_PER_KW_HALF_HOUR;
+    pvTotal += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
     houseUsage += slotConsumption(slotEnd);
   }
-
-  // Fallback: if pv1 had no slots in window, use pv2 directly
-  if (pv1Total === 0 && pv2Total === 0 && pv2Forecasts.length > 0) {
-    for (const slot of pv2Forecasts) {
-      const slotEnd = new Date(slot.period_end);
-      if (slotEnd <= now || slotEnd > peakTime) continue;
-      pv2Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
-      houseUsage += slotConsumption(slotEnd);
-    }
-  }
-
-  const pvTotal = pv1Total + pv2Total;
 
   // ── 2. How much battery capacity remains to be filled? ───────────────────
   const batteryWatts = (config.batteryCapacityWh * batteryPct) / 100;
@@ -129,8 +107,6 @@ export function calculate(
   return {
     threshold,
     lowestPrice,
-    pv1Total: Math.floor(pv1Total),
-    pv2Total: Math.floor(pv2Total),
     pvTotal: Math.floor(pvTotal),
     houseUsage: Math.floor(houseUsage),
     batteryWatts: Math.floor(batteryWatts),

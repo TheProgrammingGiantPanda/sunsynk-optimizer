@@ -21,3 +21,27 @@ export async function getSolarForecast(siteId: string, apiKey: string): Promise<
   });
   return res.data?.forecasts ?? [];
 }
+
+/**
+ * Fetches forecasts for all sites in parallel and merges them into a single
+ * array by summing pv_estimate (and p10/p90) for each period_end timestamp.
+ */
+export async function getMergedForecast(siteIds: string[], apiKey: string): Promise<ForecastSlot[]> {
+  const allForecasts = await Promise.all(siteIds.map(id => getSolarForecast(id, apiKey)));
+
+  const merged = new Map<string, ForecastSlot>();
+  for (const forecasts of allForecasts) {
+    for (const slot of forecasts) {
+      const existing = merged.get(slot.period_end);
+      if (existing) {
+        existing.pv_estimate   += slot.pv_estimate;
+        existing.pv_estimate10 += slot.pv_estimate10;
+        existing.pv_estimate90 += slot.pv_estimate90;
+      } else {
+        merged.set(slot.period_end, { ...slot });
+      }
+    }
+  }
+
+  return [...merged.values()].sort((a, b) => a.period_end.localeCompare(b.period_end));
+}

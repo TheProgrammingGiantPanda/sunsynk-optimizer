@@ -1,6 +1,6 @@
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
-import { getSolarForecast, ForecastSlot } from './solcast';
+import { getMergedForecast, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleInterval } from './scheduler';
@@ -15,11 +15,11 @@ async function main() {
   const required: (keyof typeof config)[] = [
     'sunsynkUsername', 'sunsynkPassword',
     'haUrl', 'haToken',
-    'solcastSitePv1', 'solcastSitePv2',
   ];
   for (const key of required) {
     if (!config[key]) throw new Error(`Missing required config: ${key}`);
   }
+  if (!config.solcastSites.length) throw new Error('Missing required config: solcastSites (SOLCAST_SITES)');
 
   console.log('[optimizer] Starting Sunsynk Battery Optimizer');
   console.log(`[optimizer] Peak hour: ${config.peakHour}:00`);
@@ -37,23 +37,17 @@ async function main() {
   console.log(`[optimizer] Using plant: ${plants[0].name ?? plantId} (id=${plantId})`);
 
   // Cached values — refreshed at scheduled times
-  let pv1Forecasts: ForecastSlot[] = [];
-  let pv2Forecasts: ForecastSlot[] = [];
+  let pvForecasts: ForecastSlot[] = [];
   let slotProfile: number[] | undefined;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
 
   // Forecast + consumption fetcher
   const fetchForecasts = async () => {
-    console.log('[optimizer] Fetching solar forecasts from Solcast…');
+    console.log(`[optimizer] Fetching solar forecasts from Solcast (${config.solcastSites.length} site(s))…`);
     try {
-      [pv1Forecasts, pv2Forecasts] = await Promise.all([
-        getSolarForecast(config.solcastSitePv1, config.solcastApiKey),
-        getSolarForecast(config.solcastSitePv2, config.solcastApiKey),
-      ]);
-      console.log(
-        `[optimizer] Forecasts updated: pv1=${pv1Forecasts.length} slots, pv2=${pv2Forecasts.length} slots`
-      );
+      pvForecasts = await getMergedForecast(config.solcastSites, config.solcastApiKey);
+      console.log(`[optimizer] Forecasts updated: ${pvForecasts.length} merged slots`);
     } catch (err) {
       console.error('[optimizer] Forecast fetch failed:', err);
     }
@@ -149,7 +143,7 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates, slotProfile, hpAdjustment);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment);
 
     try {
       await client.setMinCharge(plantId, result.threshold);
@@ -169,8 +163,6 @@ async function main() {
       await Promise.all([
         ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' }),
         ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' }),
-        ha('sensor.sunsynk_optimizer_pv1_total',          result.pv1Total,           { unit_of_measurement: 'Wh',     friendly_name: 'PV1 forecast to peak' }),
-        ha('sensor.sunsynk_optimizer_pv2_total',          result.pv2Total,           { unit_of_measurement: 'Wh',     friendly_name: 'PV2 forecast to peak' }),
         ha('sensor.sunsynk_optimizer_pv_total',           result.pvTotal,            { unit_of_measurement: 'Wh',     friendly_name: 'PV total forecast to peak' }),
         ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage to peak' }),
         ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' }),

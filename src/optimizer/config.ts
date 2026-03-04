@@ -13,8 +13,7 @@ export interface Config {
   haLoadDailyEntity: string;
   consumptionAverageDays: number;
   solcastApiKey: string;
-  solcastSitePv1: string;
-  solcastSitePv2: string;
+  solcastSites: string[];
   octopusProduct: string;
   octopusTariff: string;
   batteryCapacityWh: number;
@@ -41,8 +40,10 @@ function fromOptions(o: Record<string, unknown>): Config {
     haLoadDailyEntity: String(o['ha_load_daily_entity'] ?? 'sensor.solarsynkv3_2310140043_load_daily_used'),
     consumptionAverageDays: Number(o['consumption_average_days'] ?? 7),
     solcastApiKey: String(o['solcast_api_key'] ?? ''),
-    solcastSitePv1: String(o['solcast_site_pv1'] ?? ''),
-    solcastSitePv2: String(o['solcast_site_pv2'] ?? ''),
+    solcastSites: String(o['solcast_sites'] ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
     octopusProduct: String(o['octopus_product'] ?? 'AGILE-24-04-03'),
     octopusTariff: String(o['octopus_tariff'] ?? 'E-1R-AGILE-24-04-03-G'),
     batteryCapacityWh: Number(o['battery_capacity_wh'] ?? 10000),
@@ -80,8 +81,7 @@ export function loadConfig(): Config {
     ha_load_daily_entity: process.env.HA_LOAD_DAILY_ENTITY,
     consumption_average_days: process.env.CONSUMPTION_AVERAGE_DAYS,
     solcast_api_key: process.env.SOLCAST_API_KEY,
-    solcast_site_pv1: process.env.SOLCAST_SITE_PV1,
-    solcast_site_pv2: process.env.SOLCAST_SITE_PV2,
+    solcast_sites: process.env.SOLCAST_SITES,
     octopus_product: process.env.OCTOPUS_PRODUCT,
     octopus_tariff: process.env.OCTOPUS_TARIFF,
     battery_capacity_wh: process.env.BATTERY_CAPACITY_WH,
