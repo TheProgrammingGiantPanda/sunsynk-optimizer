@@ -30,7 +30,8 @@ export function calculate(
   batteryPct: number,
   pv1Forecasts: ForecastSlot[],
   pv2Forecasts: ForecastSlot[],
-  agileRates: PriceSlot[]
+  agileRates: PriceSlot[],
+  slotProfile?: number[]   // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
 ): CalculationResult {
   const now = new Date();
 
@@ -54,12 +55,20 @@ export function calculate(
     pv2Map.set(slot.period_end, slot.pv_estimate);
   }
 
+  function slotConsumption(slotEnd: Date): number {
+    if (slotProfile) {
+      const idx = slotEnd.getUTCHours() * 2 + Math.floor(slotEnd.getUTCMinutes() / 30);
+      return slotProfile[idx] ?? config.avgConsumptionWh;
+    }
+    return config.avgConsumptionWh;
+  }
+
   for (const slot of pv1Forecasts) {
     const slotEnd = new Date(slot.period_end);
     if (slotEnd <= now || slotEnd > peakTime) continue;
     pv1Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
     pv2Total += (pv2Map.get(slot.period_end) ?? 0) * WH_PER_KW_HALF_HOUR;
-    houseUsage += config.avgConsumptionWh;
+    houseUsage += slotConsumption(slotEnd);
   }
 
   // Fallback: if pv1 had no slots in window, use pv2 directly
@@ -68,7 +77,7 @@ export function calculate(
       const slotEnd = new Date(slot.period_end);
       if (slotEnd <= now || slotEnd > peakTime) continue;
       pv2Total += slot.pv_estimate * WH_PER_KW_HALF_HOUR;
-      houseUsage += config.avgConsumptionWh;
+      houseUsage += slotConsumption(slotEnd);
     }
   }
 

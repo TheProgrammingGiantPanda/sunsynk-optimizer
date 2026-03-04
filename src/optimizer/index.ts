@@ -4,7 +4,7 @@ import { getSolarForecast, ForecastSlot } from './solcast';
 import { getAgileRates } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleInterval } from './scheduler';
-import { getEntityState, setState, getAvgConsumptionWh } from './homeassistant';
+import { getEntityState, setState, getSlotProfileWh } from './homeassistant';
 
 async function main() {
   const config = loadConfig();
@@ -37,7 +37,7 @@ async function main() {
   // Cached values — refreshed at scheduled times
   let pv1Forecasts: ForecastSlot[] = [];
   let pv2Forecasts: ForecastSlot[] = [];
-  let avgConsumptionWh = config.avgConsumptionWh;
+  let slotProfile: number[] | undefined;
 
   // Forecast + consumption fetcher
   const fetchForecasts = async () => {
@@ -55,18 +55,18 @@ async function main() {
     }
 
     try {
-      const calculated = await getAvgConsumptionWh(
+      const profile = await getSlotProfileWh(
         config.haUrl, config.haToken,
         config.haLoadDailyEntity,
         config.consumptionAverageDays
       );
-      if (calculated !== null) {
-        avgConsumptionWh = calculated;
+      if (profile !== null) {
+        slotProfile = profile;
       } else {
-        console.warn(`[optimizer] Not enough consumption history — using config fallback: ${avgConsumptionWh} Wh/slot`);
+        console.warn(`[optimizer] Not enough consumption history — using config fallback: ${config.avgConsumptionWh} Wh/slot`);
       }
     } catch (err) {
-      console.error('[optimizer] Failed to calculate avg consumption:', err);
+      console.error('[optimizer] Failed to build consumption profile:', err);
     }
   };
 
@@ -111,7 +111,7 @@ async function main() {
       return;
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, avgConsumptionWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pv1Forecasts, pv2Forecasts, rates, slotProfile);
 
     try {
       await client.setMinCharge(plantId, result.threshold);
