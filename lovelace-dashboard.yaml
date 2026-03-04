@@ -1,0 +1,324 @@
+# Sunsynk Battery Optimizer — Lovelace Dashboard
+#
+# INSTALL
+# -------
+# 1. In Home Assistant, go to Settings → Dashboards → Add Dashboard → (name it "Sunsynk Optimizer")
+# 2. Open the new dashboard, click ⋮ (three dots) → Edit → Raw configuration editor
+# 3. Paste this entire file and save.
+#
+# REQUIRED: Replace the battery SOC entity (marked with ★) with your actual Sunsynk SOC sensor.
+#           All other entities are created automatically by the optimizer add-on.
+#
+# OPTIONAL sensors (present only when configured):
+#   - sensor.sunsynk_optimizer_export_rate          (requires export tariff)
+#   - sensor.sunsynk_optimizer_daily_self_sufficiency (requires ha_grid_import_daily_entity)
+#   - sensor.sunsynk_optimizer_weekly_self_sufficiency
+#   - sensor.sunsynk_optimizer_monthly_self_sufficiency
+#   - sensor.sunsynk_optimizer_hp_adjustment        (requires ha_heat_pump_entity)
+#   - sensor.sunsynk_optimizer_ev_load              (requires ha_ev_charger_entity)
+#   - sensor.sunsynk_optimizer_forecast_accuracy_7d (requires ≥7 days of data)
+#   - sensor.sunsynk_optimizer_forecast_accuracy_30d (requires ≥30 days of data)
+
+title: Sunsynk Optimizer
+views:
+
+  # ════════════════════════════════════════════════════════════════
+  #  VIEW 1: Overview — at-a-glance status
+  # ════════════════════════════════════════════════════════════════
+  - title: Overview
+    path: overview
+    icon: mdi:solar-power
+
+    cards:
+
+      # ── Active thresholds ───────────────────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            entity: sensor.sunsynk_optimizer_threshold
+            name: Charge threshold
+            unit: p/kWh
+            min: -20
+            max: 60
+            needle: true
+            severity:
+              green: -20
+              yellow: 15
+              red: 30
+
+          # ★ Replace with your Sunsynk battery SOC entity
+          - type: gauge
+            entity: sensor.solarsynkv3_2310140043_battery_bms_soc
+            name: Battery SOC
+            unit: "%"
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              red: 0
+              yellow: 20
+              green: 50
+
+          - type: gauge
+            entity: sensor.sunsynk_optimizer_sell_threshold
+            name: Sell threshold
+            unit: p/kWh
+            min: 0
+            max: 60
+            needle: true
+            severity:
+              red: 0
+              yellow: 10
+              green: 20
+
+      # ── Quick-glance stats ──────────────────────────────────────
+      - type: glance
+        title: Current Agile window
+        columns: 4
+        entities:
+          - entity: sensor.sunsynk_optimizer_expensive_slots
+            name: Expensive slots
+            icon: mdi:lightning-bolt
+          - entity: sensor.sunsynk_optimizer_blocks
+            name: Slots to buy
+            icon: mdi:battery-charging
+          - entity: sensor.sunsynk_optimizer_lowest_price
+            name: Lowest price
+            icon: mdi:tag-arrow-down
+          - entity: sensor.sunsynk_optimizer_peak_slot_price
+            name: Peak price
+            icon: mdi:tag-arrow-up
+
+      # ── PV & battery plan ───────────────────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: entities
+            title: Solar & consumption (horizon)
+            entities:
+              - entity: sensor.sunsynk_optimizer_pv_total
+                name: PV forecast (adjusted)
+                icon: mdi:solar-power
+              - entity: sensor.sunsynk_optimizer_pv_total_p50
+                name: PV forecast (p50)
+                icon: mdi:weather-sunny
+              - entity: sensor.sunsynk_optimizer_house_usage
+                name: House usage
+                icon: mdi:home-lightning-bolt
+              - entity: sensor.sunsynk_optimizer_surplus
+                name: Solar surplus
+                icon: mdi:solar-power-variant
+              - entity: sensor.sunsynk_optimizer_avg_consumption_wh
+                name: Avg per 30-min slot
+                icon: mdi:chart-bell-curve
+
+          - type: entities
+            title: Battery plan
+            entities:
+              - entity: sensor.sunsynk_optimizer_battery_watts
+                name: Battery charge now
+                icon: mdi:battery
+              - entity: sensor.sunsynk_optimizer_expensive_demand_wh
+                name: Demand in expensive slots
+                icon: mdi:battery-arrow-down
+              - entity: sensor.sunsynk_optimizer_battery_to_fill
+                name: Grid import needed
+                icon: mdi:transmission-tower
+              - entity: sensor.sunsynk_optimizer_battery_to_fill_no_pv
+                name: Grid import (no solar)
+                icon: mdi:transmission-tower-off
+              - entity: sensor.sunsynk_optimizer_effective_min_soc
+                name: Min discharge SOC
+                icon: mdi:battery-low
+              - entity: sensor.sunsynk_optimizer_actual_cost
+                name: Planned charge cost
+                icon: mdi:currency-gbp
+
+      # ── Export ──────────────────────────────────────────────────
+      - type: entities
+        title: Export & grid
+        entities:
+          - entity: sensor.sunsynk_optimizer_exportable_wh
+            name: Exportable capacity
+            icon: mdi:transmission-tower-export
+          - entity: sensor.sunsynk_optimizer_export_slot_count
+            name: Planned export slots
+            icon: mdi:calendar-clock
+          - entity: sensor.sunsynk_optimizer_export_rate
+            name: Current export rate
+            icon: mdi:cash
+          - entity: sensor.sunsynk_optimizer_export_income
+            name: Expected export income
+            icon: mdi:cash-plus
+          - entity: sensor.sunsynk_optimizer_sell_threshold
+            name: Sell threshold
+            icon: mdi:currency-gbp
+
+      # ── Savings today ───────────────────────────────────────────
+      - type: entities
+        title: Today's savings
+        entities:
+          - entity: sensor.sunsynk_optimizer_daily_saving_vs_standard
+            name: Saving vs standard tariff
+            icon: mdi:piggy-bank
+          - entity: sensor.sunsynk_optimizer_daily_saving_vs_peak
+            name: Saving vs peak Agile
+            icon: mdi:chart-line
+          - entity: sensor.sunsynk_optimizer_daily_pv_saving
+            name: Solar saving
+            icon: mdi:solar-power
+          - entity: sensor.sunsynk_optimizer_daily_export_income
+            name: Export income
+            icon: mdi:cash-plus
+          - entity: sensor.sunsynk_optimizer_daily_co2_saved
+            name: CO₂ saved
+            icon: mdi:leaf
+          - entity: sensor.sunsynk_optimizer_daily_self_sufficiency
+            name: Self-sufficiency
+            icon: mdi:home-battery
+
+      # ── Threshold history ───────────────────────────────────────
+      - type: history-graph
+        title: Charge & sell thresholds (past 24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.sunsynk_optimizer_threshold
+            name: Charge threshold
+          - entity: sensor.sunsynk_optimizer_sell_threshold
+            name: Sell threshold
+          - entity: sensor.sunsynk_optimizer_peak_slot_price
+            name: Peak slot price
+
+  # ════════════════════════════════════════════════════════════════
+  #  VIEW 2: Savings — weekly, monthly, CO₂, self-sufficiency
+  # ════════════════════════════════════════════════════════════════
+  - title: Savings
+    path: savings
+    icon: mdi:piggy-bank
+
+    cards:
+
+      # ── This week ───────────────────────────────────────────────
+      - type: entities
+        title: This week
+        entities:
+          - entity: sensor.sunsynk_optimizer_weekly_saving_vs_standard
+            name: Saving vs standard tariff
+            icon: mdi:piggy-bank
+          - entity: sensor.sunsynk_optimizer_weekly_export_income
+            name: Export income
+            icon: mdi:cash-plus
+          - entity: sensor.sunsynk_optimizer_weekly_co2_saved
+            name: CO₂ saved
+            icon: mdi:leaf
+          - entity: sensor.sunsynk_optimizer_weekly_self_sufficiency
+            name: Self-sufficiency
+            icon: mdi:home-battery
+
+      # ── This month ──────────────────────────────────────────────
+      - type: entities
+        title: This month
+        entities:
+          - entity: sensor.sunsynk_optimizer_monthly_saving_vs_standard
+            name: Saving vs standard tariff
+            icon: mdi:piggy-bank
+          - entity: sensor.sunsynk_optimizer_monthly_export_income
+            name: Export income
+            icon: mdi:cash-plus
+          - entity: sensor.sunsynk_optimizer_monthly_co2_saved
+            name: CO₂ saved
+            icon: mdi:leaf
+          - entity: sensor.sunsynk_optimizer_monthly_self_sufficiency
+            name: Self-sufficiency
+            icon: mdi:home-battery
+
+      # ── Savings history chart ───────────────────────────────────
+      - type: history-graph
+        title: Daily savings — past 7 days
+        hours_to_show: 168
+        entities:
+          - entity: sensor.sunsynk_optimizer_daily_saving_vs_standard
+            name: vs standard tariff
+          - entity: sensor.sunsynk_optimizer_daily_pv_saving
+            name: Solar saving
+          - entity: sensor.sunsynk_optimizer_daily_export_income
+            name: Export income
+
+      # ── CO₂ history chart ───────────────────────────────────────
+      - type: history-graph
+        title: CO₂ saved — past 7 days
+        hours_to_show: 168
+        entities:
+          - entity: sensor.sunsynk_optimizer_daily_co2_saved
+            name: Daily CO₂ saved
+
+      # ── Self-sufficiency history ────────────────────────────────
+      - type: history-graph
+        title: Self-sufficiency — past 7 days
+        hours_to_show: 168
+        entities:
+          - entity: sensor.sunsynk_optimizer_daily_self_sufficiency
+            name: Self-sufficiency
+
+  # ════════════════════════════════════════════════════════════════
+  #  VIEW 3: System — forecasts, accuracy, diagnostics
+  # ════════════════════════════════════════════════════════════════
+  - title: System
+    path: system
+    icon: mdi:cog
+
+    cards:
+
+      # ── Solcast accuracy ────────────────────────────────────────
+      - type: entities
+        title: Solcast forecast accuracy
+        entities:
+          - entity: sensor.sunsynk_optimizer_forecast_accuracy_7d
+            name: MAPE 7-day
+            icon: mdi:chart-line
+          - entity: sensor.sunsynk_optimizer_forecast_accuracy_30d
+            name: MAPE 30-day
+            icon: mdi:chart-timeline-variant
+
+      # ── PV forecast history ─────────────────────────────────────
+      - type: history-graph
+        title: PV forecast vs house usage (past 24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.sunsynk_optimizer_pv_total
+            name: PV forecast (adjusted)
+          - entity: sensor.sunsynk_optimizer_pv_total_p50
+            name: PV p50
+          - entity: sensor.sunsynk_optimizer_house_usage
+            name: House usage
+
+      # ── Battery charge history ──────────────────────────────────
+      - type: history-graph
+        title: Battery charge & grid import needed (past 24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.sunsynk_optimizer_battery_watts
+            name: Battery charge
+          - entity: sensor.sunsynk_optimizer_battery_to_fill
+            name: Grid import needed
+          - entity: sensor.sunsynk_optimizer_expensive_demand_wh
+            name: Expensive demand
+
+      # ── Diagnostics ─────────────────────────────────────────────
+      - type: entities
+        title: Diagnostics
+        entities:
+          - entity: sensor.sunsynk_optimizer_avg_consumption_wh
+            name: Avg consumption / 30-min slot
+            icon: mdi:chart-bell-curve
+          - entity: sensor.sunsynk_optimizer_results
+            name: Agile slots in window
+            icon: mdi:clock-time-eight
+          - entity: sensor.sunsynk_optimizer_ev_load
+            name: EV estimated load
+            icon: mdi:car-electric
+          - entity: sensor.sunsynk_optimizer_hp_adjustment
+            name: Heat pump adjustment
+            icon: mdi:heat-pump
+          - entity: sensor.sunsynk_optimizer_slot_profile
+            name: Slot profile (daily total)
+            icon: mdi:chart-bar
