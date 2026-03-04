@@ -38,6 +38,8 @@ export interface Config {
   carbonIntensityRegionId: number;      // National Grid ESO region ID (0 = national average)
   lowSolarThresholdWh: number;          // 0 = disabled; if tomorrow P50 PV < this Wh, use backupMinSoc
   backupMinSoc: number;                 // min SOC % when tomorrow solar is poor (default 40)
+  haPvDailyEntity: string;             // optional — daily PV generation sensor (kWh) for forecast accuracy tracking
+  autoTuneConfidence: boolean;          // if true, auto-adjust forecastConfidenceFactor from observed Solcast accuracy
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -83,6 +85,8 @@ function fromOptions(o: Record<string, unknown>): Config {
     carbonIntensityRegionId: Number(o['carbon_intensity_region_id'] ?? 0),
     lowSolarThresholdWh: Number(o['low_solar_threshold_wh'] ?? 0),
     backupMinSoc: Number(o['backup_min_soc'] ?? 40),
+    haPvDailyEntity: String(o['ha_pv_daily_entity'] ?? ''),
+    autoTuneConfidence: String(o['auto_tune_confidence'] ?? 'false').toLowerCase() === 'true',
   };
 }
 
@@ -132,5 +136,7 @@ export function loadConfig(): Config {
     carbon_intensity_region_id: process.env.CARBON_INTENSITY_REGION_ID,
     low_solar_threshold_wh: process.env.LOW_SOLAR_THRESHOLD_WH,
     backup_min_soc: process.env.BACKUP_MIN_SOC,
+    ha_pv_daily_entity: process.env.HA_PV_DAILY_ENTITY,
+    auto_tune_confidence: process.env.AUTO_TUNE_CONFIDENCE,
   });
 }

@@ -127,6 +127,15 @@ If configured, the optimizer builds a model of heat pump power vs outdoor temper
 | `low_solar_threshold_wh` | `LOW_SOLAR_THRESHOLD_WH` | `0` | If tomorrow's Solcast P50 forecast is below this value (Wh), the optimizer raises the minimum discharge SoC to `backup_min_soc` to protect against running flat on a poor solar day. `0` = disabled. |
 | `backup_min_soc` | `BACKUP_MIN_SOC` | `40` | Minimum discharge SoC (%) to use when tomorrow's solar forecast is below `low_solar_threshold_wh`. Has no effect when `low_solar_threshold_wh` is `0`. |
 
+### Forecast accuracy tracking (optional)
+
+If `ha_pv_daily_entity` is configured, the optimizer compares yesterday's Solcast P50 prediction against actual generation each time forecasts are refreshed (06:00 and 12:00). Accuracy records are persisted to `/data/forecast_accuracy.json` (up to 90 days). When enough data is available, MAPE sensors are written and `forecastConfidenceFactor` can be auto-tuned.
+
+| Option | Env var | Default | Description |
+|---|---|---|---|
+| `ha_pv_daily_entity` | `HA_PV_DAILY_ENTITY` | `""` | Daily PV generation entity (kWh, resets at midnight). Used to measure Solcast forecast accuracy. Leave blank to disable. |
+| `auto_tune_confidence` | `AUTO_TUNE_CONFIDENCE` | `false` | If `true`, automatically adjusts `forecast_confidence_factor` based on observed Solcast MAPE over the last 7 days. MAPE of 0% → factor 0.0, MAPE of 50% → 0.5, MAPE of 100% → 1.0. |
+
 ### Carbon intensity (optional)
 
 If configured, the optimizer blends forecast carbon intensity (from the National Grid ESO Carbon Intensity API) into slot scoring so that lower-carbon cheap slots are preferred over higher-carbon ones of similar price.
@@ -226,6 +235,8 @@ After each price update the following sensors are written to Home Assistant:
 | `sensor.sunsynk_optimizer_threshold` | p/kWh | Charge threshold set on Sunsynk |
 | `sensor.sunsynk_optimizer_effective_min_soc` | % | Active minimum discharge SoC — equals `min_discharge_soc` normally, or `backup_min_soc` when tomorrow's solar forecast is below `low_solar_threshold_wh` |
 | `sensor.sunsynk_optimizer_avg_consumption_wh` | Wh | Average house consumption per 30-min slot in use. Attribute `source` shows `"history"` (auto-derived) or `"config"` (static fallback). |
+| `sensor.sunsynk_optimizer_forecast_accuracy_7d` | % | Solcast forecast MAPE over last 7 days (only present once ≥2 complete records exist). Lower is better. |
+| `sensor.sunsynk_optimizer_forecast_accuracy_30d` | % | Solcast forecast MAPE over last 30 days. |
 | `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
 | `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
 | `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |

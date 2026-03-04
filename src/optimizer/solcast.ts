@@ -100,17 +100,23 @@ export async function getMergedForecast(siteIds: string[], apiKey: string): Prom
 }
 
 /**
- * Returns the P50 PV generation forecast for tomorrow (UTC calendar date) in Wh.
+ * Returns the total P50 PV generation forecast (Wh) for a given UTC calendar date.
  * Each slot's pv_estimate is in kW over a 30-min period, so energy = kW × 0.5 × 1000 Wh.
- * Returns 0 if no slots are available for tomorrow.
+ * Returns 0 if no slots are available for that date.
+ */
+export function dailyPvWhByDate(forecasts: ForecastSlot[], date: string): number {
+  return Math.round(
+    forecasts
+      .filter(s => s.period_end.startsWith(date))
+      .reduce((sum, s) => sum + s.pv_estimate * 0.5 * 1000, 0)
+  );
+}
+
+/**
+ * Returns the P50 PV generation forecast for tomorrow (UTC calendar date) in Wh.
  */
 export function tomorrowPvWh(forecasts: ForecastSlot[]): number {
   const tomorrow = new Date();
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  const tomorrowDateStr = tomorrow.toISOString().slice(0, 10);
-  return Math.round(
-    forecasts
-      .filter(s => s.period_end.startsWith(tomorrowDateStr))
-      .reduce((sum, s) => sum + s.pv_estimate * 0.5 * 1000, 0)
-  );
+  return dailyPvWhByDate(forecasts, tomorrow.toISOString().slice(0, 10));
 }

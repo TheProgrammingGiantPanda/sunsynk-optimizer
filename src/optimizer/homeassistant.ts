@@ -193,6 +193,37 @@ export async function getSlotProfileWh(
   return profile;
 }
 
+/**
+ * Returns the maximum (end-of-day peak) value of a daily-accumulating sensor for a specific
+ * UTC calendar date (YYYY-MM-DD). Returns null if no data is available for that date.
+ * Useful for reading yesterday's actual PV or load generation total.
+ */
+export async function getDayMaxKwh(
+  haUrl: string,
+  haToken: string,
+  entityId: string,
+  date: string // YYYY-MM-DD UTC
+): Promise<number | null> {
+  const start = new Date(date + 'T00:00:00Z');
+  const end   = new Date(date + 'T23:59:59Z');
+
+  const res = await withRetry(
+    () => haClient(haUrl, haToken).get(
+      `/history/period/${start.toISOString()}`,
+      { params: { filter_entity_id: entityId, end_time: end.toISOString() }, timeout: 30000 }
+    ),
+    { label: `HA history ${entityId} ${date}`, baseDelayMs: 2000 }
+  );
+
+  const states: any[] = res.data?.[0] ?? [];
+  let max = -Infinity;
+  for (const s of states) {
+    const val = parseFloat(s.state);
+    if (!isNaN(val) && val > max) max = val;
+  }
+  return max === -Infinity ? null : max;
+}
+
 const NOTIFICATION_ID = 'sunsynk_optimizer';
 export const NOTIFICATION_ID_NEGATIVE_PRICES = 'sunsynk_optimizer_negative_prices';
 

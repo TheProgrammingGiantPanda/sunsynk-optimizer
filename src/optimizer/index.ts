@@ -3,12 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
-import { getMergedForecast, loadForecastCache, ForecastSlot, tomorrowPvWh } from './solcast';
+import { getMergedForecast, loadForecastCache, ForecastSlot, tomorrowPvWh, dailyPvWhByDate } from './solcast';
 import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octopus';
 import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
-import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, createNotification, dismissNotification, NOTIFICATION_ID_NEGATIVE_PRICES } from './homeassistant';
+import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, getDayMaxKwh, createNotification, dismissNotification, NOTIFICATION_ID_NEGATIVE_PRICES } from './homeassistant';
+import { loadAccuracyHistory, saveAccuracyHistory, recordForecast, recordActual, getAccuracyStats, suggestConfidenceFactor, AccuracyRecord } from './accuracy';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 import { loadSavingsHistory, updateSavingsHistory, SavingsHistory } from './savings';
@@ -113,10 +114,14 @@ async function main() {
   // Weekly / monthly savings history — persisted across restarts
   let savingsHistory: SavingsHistory = loadSavingsHistory();
 
+  // Solcast forecast accuracy history — persisted across restarts
+  let accuracyHistory: AccuracyRecord[] = loadAccuracyHistory();
+  let computedConfidenceFactor: number | null = null;
+
   // Forecast + consumption fetcher
   // useCache: skip Solcast API call if a fresh cache already exists (used on startup to avoid
   // burning the hobbyist quota every time the service restarts)
-  const fetchForecasts = async (useCache = false) => {
+  const fetchForecasts = async (useCache = false, updateAccuracy = true) => {
     let solcastFetched = false;
     if (useCache) {
       const cached = loadForecastCache();
@@ -178,10 +183,49 @@ async function main() {
         console.error('[optimizer] Failed to build heat pump model:', err);
       }
     }
+
+    // Forecast accuracy tracking (only on scheduled fetches, not cache-only startup)
+    if (updateAccuracy && pvForecasts.length > 0) {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const todayForecastWh = dailyPvWhByDate(pvForecasts, today);
+        if (todayForecastWh > 0) {
+          accuracyHistory = recordForecast(accuracyHistory, today, todayForecastWh);
+        }
+
+        // Complete yesterday's record with actual generation if entity is configured
+        if (config.haPvDailyEntity) {
+          const yesterday = new Date();
+          yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+          const yesterdayStr = yesterday.toISOString().slice(0, 10);
+          const actualKwh = await getDayMaxKwh(config.haUrl, config.haToken, config.haPvDailyEntity, yesterdayStr);
+          if (actualKwh !== null) {
+            const actualWh = Math.round(actualKwh * 1000);
+            accuracyHistory = recordActual(accuracyHistory, yesterdayStr, actualWh);
+            const stats = getAccuracyStats(accuracyHistory);
+            console.log(
+              `[accuracy] Yesterday (${yesterdayStr}): forecast=${accuracyHistory.find(r => r.date === yesterdayStr)?.forecastP50Wh ?? '?'} Wh, ` +
+              `actual=${actualWh} Wh` +
+              (stats.mape7d !== null ? `, MAPE 7d=${stats.mape7d}%` : '') +
+              (stats.mape30d !== null ? `, 30d=${stats.mape30d}%` : '')
+            );
+
+            if (config.autoTuneConfidence && stats.mape7d !== null) {
+              computedConfidenceFactor = suggestConfidenceFactor(stats.mape7d);
+              console.log(`[accuracy] Auto-tuned forecastConfidenceFactor → ${computedConfidenceFactor} (MAPE 7d=${stats.mape7d}%)`);
+            }
+          }
+        }
+
+        saveAccuracyHistory(accuracyHistory);
+      } catch (err) {
+        console.error('[optimizer] Forecast accuracy update failed:', err);
+      }
+    }
   };
 
-  // Startup: use cache if fresh (avoids Solcast API call on every restart)
-  fetchForecasts(true).catch(err => console.error('[optimizer] Initial forecast error:', err));
+  // Startup: use cache if fresh (avoids Solcast API call on every restart); skip accuracy update
+  fetchForecasts(true, false).catch(err => console.error('[optimizer] Initial forecast error:', err));
   // Scheduled fetches (e.g. 06:00, 12:00): always pull fresh data from Solcast
   scheduleDailyTimes(config.forecastFetchTimes, fetchForecasts, false);
 
@@ -377,8 +421,10 @@ async function main() {
 
     // Use history-derived avg if available, falling back to static config
     const effectiveAvgConsumptionWh = computedAvgConsumptionWh ?? config.avgConsumptionWh;
+    // Use auto-tuned confidence factor if available, otherwise static config
+    const effectiveConfidenceFactor = computedConfidenceFactor ?? config.forecastConfidenceFactor;
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, avgConsumptionWh: effectiveAvgConsumptionWh }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -432,6 +478,13 @@ async function main() {
         ['threshold',          ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' })],
         ['effective_min_soc',  ha('sensor.sunsynk_optimizer_effective_min_soc',  effectiveMinSoc,          { unit_of_measurement: '%', friendly_name: 'Effective minimum discharge SOC' })],
         ['avg_consumption_wh', ha('sensor.sunsynk_optimizer_avg_consumption_wh', effectiveAvgConsumptionWh, { unit_of_measurement: 'Wh', friendly_name: 'Avg house consumption per 30-min slot', source: computedAvgConsumptionWh !== null ? 'history' : 'config' })],
+        ...(() => {
+          const stats = getAccuracyStats(accuracyHistory);
+          const entries: [string, Promise<unknown>][] = [];
+          if (stats.mape7d !== null)  entries.push(['forecast_accuracy_7d',  ha('sensor.sunsynk_optimizer_forecast_accuracy_7d',  stats.mape7d,  { unit_of_measurement: '%', friendly_name: 'Solcast forecast accuracy — MAPE 7d' })]);
+          if (stats.mape30d !== null) entries.push(['forecast_accuracy_30d', ha('sensor.sunsynk_optimizer_forecast_accuracy_30d', stats.mape30d, { unit_of_measurement: '%', friendly_name: 'Solcast forecast accuracy — MAPE 30d' })]);
+          return entries;
+        })(),
         ['expensive_slots',    ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` })],
         ['expensive_demand_wh', ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' })],
         ['lowest_price',       ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' })],
