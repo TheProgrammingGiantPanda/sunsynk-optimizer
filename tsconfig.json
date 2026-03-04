@@ -8,9 +8,10 @@
     "forceConsistentCasingInFileNames": true,
     "allowJs": true,
     "declaration": true,
-
-    "declarationMap": true
+    "declarationMap": true,
+    "skipLibCheck": true
   },
   "include": ["src", "src/*.d.ts", "types/encryptjs.d.ts"],
+  "exclude": ["src/**/__tests__", "node_modules"],
   "typeRoots": ["./types", "./node_modules/@types"]
 }

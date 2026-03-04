@@ -25,6 +25,7 @@ export interface Config {
   forecastFetchTimes: string[];
   haHeatPumpEntity: string;
   haOutdoorTempEntity: string;
+  standardTariffPence: number;
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -57,6 +58,7 @@ function fromOptions(o: Record<string, unknown>): Config {
       .map(t => t.trim()),
     haHeatPumpEntity: String(o['ha_heat_pump_entity'] ?? ''),
     haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
+    standardTariffPence: Number(o['standard_tariff_pence'] ?? 24),
   };
 }
 
@@ -93,5 +95,6 @@ export function loadConfig(): Config {
     forecast_fetch_times: process.env.FORECAST_FETCH_TIMES,
     ha_heat_pump_entity: process.env.HA_HEAT_PUMP_ENTITY,
     ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
+    standard_tariff_pence: process.env.STANDARD_TARIFF_PENCE,
   });
 }

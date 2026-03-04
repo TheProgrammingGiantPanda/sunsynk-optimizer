@@ -31,6 +31,7 @@ const BASE_CONFIG: Config = {
   forecastFetchTimes: ['06:00', '12:00'],
   haHeatPumpEntity: '',
   haOutdoorTempEntity: '',
+  standardTariffPence: 24,
 };
 
 /** Build a 30-min price slot starting offsetHours after NOW */
@@ -128,6 +129,20 @@ describe('calculate', () => {
   it('returns correct batteryWatts for a given SOC', () => {
     const result = calculate(BASE_CONFIG, 60, [], RATES);
     expect(result.batteryWatts).toBe(Math.floor(10000 * 0.6));
+  });
+
+  it('calculates pvSavingPence as the cost of slots solar made unnecessary', () => {
+    // Without PV: batteryToFillNoPV = 10000 - 5000 = 5000 → 2 blocks
+    // With PV (surplus=4000): batteryToFill = 1000 → 1 block
+    // PV saved slot index 1 (price 11p) × 2.5 kWh = 27.5p
+    const result = calculate(BASE_CONFIG, 50, PV_8_SLOTS, RATES);
+    expect(result.pvSavingPence).toBeCloseTo(11 * (2500 / 1000), 1); // 27.5p
+  });
+
+  it('pvSavingPence is zero when solar creates no surplus', () => {
+    // No PV → no surplus → pvSaving = 0
+    const result = calculate(BASE_CONFIG, 50, [], RATES);
+    expect(result.pvSavingPence).toBe(0);
   });
 
   it('pushes peak to tomorrow if peakHour has already passed today', () => {

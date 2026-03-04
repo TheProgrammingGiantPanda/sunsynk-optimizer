@@ -51,6 +51,12 @@ async function main() {
   // Cached values — refreshed at scheduled times
   // Pre-populate from disk cache so price updates work immediately on restart
   let pvForecasts: ForecastSlot[] = loadForecastCache() ?? [];
+
+  // Daily savings accumulators — reset when the calendar date changes
+  let savingDate = new Date().toISOString().slice(0, 10);
+  let dailySavingVsPeakPence = 0;
+  let dailySavingVsStandardPence = 0;
+  let dailyPvSavingPence = 0;
   let slotProfile: number[] | undefined;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
@@ -172,6 +178,18 @@ async function main() {
 
     const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment);
 
+    // Accumulate daily savings; reset at midnight
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== savingDate) {
+      dailySavingVsPeakPence = 0;
+      dailySavingVsStandardPence = 0;
+      dailyPvSavingPence = 0;
+      savingDate = today;
+    }
+    dailySavingVsPeakPence     += result.savingVsPeakPence;
+    dailySavingVsStandardPence += result.savingVsStandardPence;
+    dailyPvSavingPence         += result.pvSavingPence;
+
     try {
       await client.setMinCharge(plantId, result.threshold);
       console.log(
@@ -204,6 +222,11 @@ async function main() {
         ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' }),
         ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' }),
         ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
+        ha('sensor.sunsynk_optimizer_actual_cost',        result.actualCostPence,    { unit_of_measurement: 'p', friendly_name: 'Planned charge cost (Agile)' }),
+        ha('sensor.sunsynk_optimizer_peak_slot_price',    result.peakSlotPricePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Agile price at peak hour' }),
+        ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(dailySavingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
+        ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(dailySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
+        ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
         ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }

@@ -12,8 +12,14 @@ export interface CalculationResult {
   batteryToFill: number;     // Wh — grid import needed (accounting for solar)
   batteryToFillNoPV: number; // Wh — grid import needed (ignoring solar)
   surplus: number;           // Wh — pvTotal minus houseUsage
-  blocks: number;            // number of 30-min charging slots to buy
-  results: PriceSlot[];      // cheapest Agile slots in window, sorted ascending
+  blocks: number;                  // number of 30-min charging slots to buy
+  results: PriceSlot[];            // cheapest Agile slots in window, sorted ascending
+  energyPurchasedWh: number;       // Wh of grid import planned
+  actualCostPence: number;         // cost at the purchased Agile slot prices
+  peakSlotPricePence: number;      // Agile price at peakHour (reference for saving calc)
+  savingVsPeakPence: number;       // saving vs buying all energy at peak-hour Agile price
+  savingVsStandardPence: number;   // saving vs buying all energy at the standard tariff rate
+  pvSavingPence: number;           // saving from not needing to buy slots that solar covers
 }
 
 /**
@@ -115,6 +121,35 @@ export function calculate(
     threshold = Math.max(Math.ceil(windowRates[idx].value_inc_vat), config.minChargeFloorPence);
   }
 
+  // ── 4. Cost savings vs peak-hour Agile and standard tariff ──────────────
+  const purchasedSlots = blocks > 0 ? windowRates.slice(0, blocks) : [];
+  const energyPurchasedWh = blocks > 0 ? blocks * config.batteryFillRateWh : 0;
+  const energyPurchasedKwh = energyPurchasedWh / 1000;
+
+  const actualCostPence = purchasedSlots.reduce(
+    (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
+  );
+
+  // Find the Agile slot that covers peakTime (the reference "what you'd pay at peak")
+  const peakSlot = agileRates.find(r => {
+    const from = new Date(r.valid_from);
+    const to   = new Date(r.valid_to);
+    return from <= peakTime && to > peakTime;
+  });
+  const peakSlotPricePence = peakSlot?.value_inc_vat ?? 0;
+
+  const savingVsPeakPence     = peakSlotPricePence * energyPurchasedKwh - actualCostPence;
+  const savingVsStandardPence = config.standardTariffPence * energyPurchasedKwh - actualCostPence;
+
+  // PV saving: cost of the slots solar made unnecessary
+  // blocksWithoutPV uses batteryToFillNoPV (ignores solar); if PV created surplus,
+  // blocksWithoutPV > blocks and the difference is what solar saved us buying.
+  const blocksWithoutPV = Math.max(0, Math.ceil(batteryToFillNoPV / config.batteryFillRateWh));
+  const pvSavedSlots = blocksWithoutPV > blocks ? windowRates.slice(blocks, blocksWithoutPV) : [];
+  const pvSavingPence = pvSavedSlots.reduce(
+    (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
+  );
+
   const confidenceAdj = pvTotalP50 > 0
     ? ((pvTotal - pvTotalP50) / pvTotalP50 * 100).toFixed(1)
     : '0.0';
@@ -138,5 +173,11 @@ export function calculate(
     surplus: Math.floor(surplus),
     blocks,
     results: windowRates,
+    energyPurchasedWh,
+    actualCostPence: Math.round(actualCostPence * 10) / 10,
+    peakSlotPricePence,
+    savingVsPeakPence:     Math.round(savingVsPeakPence * 10) / 10,
+    savingVsStandardPence: Math.round(savingVsStandardPence * 10) / 10,
+    pvSavingPence:         Math.round(pvSavingPence * 10) / 10,
   };
 }
