@@ -11,15 +11,27 @@ import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 async function main() {
   const config = loadConfig();
 
-  // Validate required config
-  const required: (keyof typeof config)[] = [
+  // Validate required string config
+  const requiredStrings: (keyof typeof config)[] = [
     'sunsynkUsername', 'sunsynkPassword',
     'haUrl', 'haToken',
+    'solcastApiKey',
   ];
-  for (const key of required) {
-    if (!config[key]) throw new Error(`Missing required config: ${key}`);
+  for (const key of requiredStrings) {
+    const val = config[key];
+    if (typeof val !== 'string' || !val.trim()) {
+      throw new Error(`Missing required config: ${key}`);
+    }
   }
   if (!config.solcastSites.length) throw new Error('Missing required config: solcastSites (SOLCAST_SITES)');
+
+  // Validate numeric config
+  if (isNaN(config.batteryCapacityWh) || config.batteryCapacityWh <= 0)
+    throw new Error(`Invalid config: batteryCapacityWh must be a positive number (got ${config.batteryCapacityWh})`);
+  if (isNaN(config.batteryFillRateWh) || config.batteryFillRateWh <= 0)
+    throw new Error(`Invalid config: batteryFillRateWh must be a positive number (got ${config.batteryFillRateWh})`);
+  if (isNaN(config.peakHour) || config.peakHour < 0 || config.peakHour > 23)
+    throw new Error(`Invalid config: peakHour must be 0–23 (got ${config.peakHour})`);
 
   console.log('[optimizer] Starting Sunsynk Battery Optimizer');
   console.log(`[optimizer] Peak hour: ${config.peakHour}:00`);
