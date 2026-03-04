@@ -326,48 +326,55 @@ async function main() {
     }
 
     // Push results to HA sensors
-    try {
+    {
       const ha = (id: string, state: string | number, attrs: Record<string, unknown> = {}) =>
         setState(config.haUrl, config.haToken, id, state, attrs);
 
-      await Promise.all([
-        ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' }),
-        ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` }),
-        ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' }),
-        ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' }),
-        ha('sensor.sunsynk_optimizer_pv_total',            result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (confidence-adjusted)' }),
-        ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (p50)' }),
-        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage over Agile horizon' }),
-        ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' }),
-        ha('sensor.sunsynk_optimizer_battery_to_fill',    result.batteryToFill,      { unit_of_measurement: 'Wh',     friendly_name: 'Battery grid import needed' }),
-        ha('sensor.sunsynk_optimizer_battery_to_fill_no_pv', result.batteryToFillNoPV, { unit_of_measurement: 'Wh',  friendly_name: 'Battery grid import needed (no PV)' }),
-        ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' }),
-        ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' }),
-        ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results }),
-        ha('sensor.sunsynk_optimizer_actual_cost',        result.actualCostPence,    { unit_of_measurement: 'p', friendly_name: 'Planned charge cost (Agile)' }),
-        ha('sensor.sunsynk_optimizer_peak_slot_price',    result.peakSlotPricePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Agile price at peak hour' }),
-        ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(accumulators.savingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
-        ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
-        ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
-        ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' }),
-        ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
-        ...(exportRatePence > 0 ? [ha('sensor.sunsynk_optimizer_export_rate', exportRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Effective export rate' })] : []),
-        ...(result.exportableWh > 0 ? [ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh', friendly_name: 'Energy available to sell to grid' })] : []),
-        ...(result.sellThreshold > 0 ? [ha('sensor.sunsynk_optimizer_sell_threshold', result.sellThreshold, { unit_of_measurement: 'p/kWh', friendly_name: 'Sell-to-grid threshold' })] : []),
-        ...(result.exportSlotCount > 0 ? [ha('sensor.sunsynk_optimizer_export_slot_count', result.exportSlotCount, { friendly_name: 'Planned export slots' })] : []),
-        ...(result.exportIncomePence > 0 ? [ha('sensor.sunsynk_optimizer_export_income', result.exportIncomePence, { unit_of_measurement: 'p', friendly_name: 'Expected export income' })] : []),
-        ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
+      const writes: [string, Promise<unknown>][] = [
+        ['threshold',          ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' })],
+        ['expensive_slots',    ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` })],
+        ['expensive_demand_wh', ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' })],
+        ['lowest_price',       ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' })],
+        ['pv_total',           ha('sensor.sunsynk_optimizer_pv_total',           result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (confidence-adjusted)' })],
+        ['pv_total_p50',       ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'PV forecast over Agile horizon (p50)' })],
+        ['house_usage',        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Estimated house usage over Agile horizon' })],
+        ['battery_watts',      ha('sensor.sunsynk_optimizer_battery_watts',      result.batteryWatts,       { unit_of_measurement: 'Wh',     friendly_name: 'Battery current charge' })],
+        ['battery_to_fill',    ha('sensor.sunsynk_optimizer_battery_to_fill',    result.batteryToFill,      { unit_of_measurement: 'Wh',     friendly_name: 'Battery grid import needed' })],
+        ['battery_to_fill_no_pv', ha('sensor.sunsynk_optimizer_battery_to_fill_no_pv', result.batteryToFillNoPV, { unit_of_measurement: 'Wh', friendly_name: 'Battery grid import needed (no PV)' })],
+        ['surplus',            ha('sensor.sunsynk_optimizer_surplus',            result.surplus,            { unit_of_measurement: 'Wh',     friendly_name: 'Solar surplus to peak' })],
+        ['blocks',             ha('sensor.sunsynk_optimizer_blocks',             result.blocks,             { friendly_name: 'Charging slots to buy' })],
+        ['results',            ha('sensor.sunsynk_optimizer_results',            result.results.length,     { friendly_name: 'Agile slots in window', slots: result.results })],
+        ['actual_cost',        ha('sensor.sunsynk_optimizer_actual_cost',        result.actualCostPence,    { unit_of_measurement: 'p', friendly_name: 'Planned charge cost (Agile)' })],
+        ['peak_slot_price',    ha('sensor.sunsynk_optimizer_peak_slot_price',    result.peakSlotPricePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Agile price at peak hour' })],
+        ['daily_saving_vs_peak',     ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(accumulators.savingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' })],
+        ['daily_saving_vs_standard', ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` })],
+        ['daily_pv_saving',          ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' })],
+        ['daily_export_income',      ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' })],
+        ...(evLoadWh > 0 ? [['ev_load',        ha('sensor.sunsynk_optimizer_ev_load',        evLoadWh,               { unit_of_measurement: 'Wh',     friendly_name: 'Estimated EV charge load to peak' })] as [string, Promise<unknown>]] : []),
+        ...(exportRatePence > 0 ? [['export_rate',   ha('sensor.sunsynk_optimizer_export_rate',   exportRatePence,        { unit_of_measurement: 'p/kWh',  friendly_name: 'Effective export rate' })] as [string, Promise<unknown>]] : []),
+        ...(result.exportableWh > 0 ? [['exportable_wh', ha('sensor.sunsynk_optimizer_exportable_wh', result.exportableWh, { unit_of_measurement: 'Wh',     friendly_name: 'Energy available to sell to grid' })] as [string, Promise<unknown>]] : []),
+        ...(result.sellThreshold > 0 ? [['sell_threshold', ha('sensor.sunsynk_optimizer_sell_threshold', result.sellThreshold, { unit_of_measurement: 'p/kWh', friendly_name: 'Sell-to-grid threshold' })] as [string, Promise<unknown>]] : []),
+        ...(result.exportSlotCount > 0 ? [['export_slot_count', ha('sensor.sunsynk_optimizer_export_slot_count', result.exportSlotCount, { friendly_name: 'Planned export slots' })] as [string, Promise<unknown>]] : []),
+        ...(result.exportIncomePence > 0 ? [['export_income', ha('sensor.sunsynk_optimizer_export_income', result.exportIncomePence, { unit_of_measurement: 'p', friendly_name: 'Expected export income' })] as [string, Promise<unknown>]] : []),
+        ...(hpAdjustment ? [['hp_adjustment', ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }
-        )] : []),
-        ...(slotProfile ? [ha('sensor.sunsynk_optimizer_slot_profile',
+        )] as [string, Promise<unknown>]] : []),
+        ...(slotProfile ? [['slot_profile', ha('sensor.sunsynk_optimizer_slot_profile',
           slotProfile.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Avg daily consumption profile', slots: slotProfile }
-        )] : []),
-      ]);
-      console.log('[optimizer] HA sensors updated');
-    } catch (err) {
-      console.error('[optimizer] Failed to update HA sensors:', err);
+        )] as [string, Promise<unknown>]] : []),
+      ];
+
+      const results = await Promise.allSettled(writes.map(([, p]) => p));
+      const failed = results
+        .map((r, i) => r.status === 'rejected' ? writes[i][0] : null)
+        .filter(Boolean);
+      if (failed.length) {
+        console.error(`[optimizer] Failed to write HA sensors: ${failed.join(', ')}`);
+      } else {
+        console.log('[optimizer] HA sensors updated');
+      }
     }
   });
 }
