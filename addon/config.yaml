@@ -2,7 +2,7 @@ name: "Sunsynk Optimizer"
 version: "1.0.0"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
-url: "https://github.com/your-repo/sunsynk"
+url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
 arch:
   - aarch64
   - amd64
