@@ -56,7 +56,8 @@ export function scheduleDailyTimes(
  */
 export function scheduleAgileAligned(
   callback: () => Promise<void>,
-  offsetMinutes = 2
+  offsetMinutes = 2,
+  runOnStart = true
 ): void {
   const SLOT_MS = 30 * 60 * 1000;
 
@@ -68,6 +69,10 @@ export function scheduleAgileAligned(
     }
     setTimeout(run, SLOT_MS);
   };
+
+  if (runOnStart) {
+    callback().catch(err => console.error('[scheduler] Initial price update error:', err));
+  }
 
   // Find ms until the next :0X or :3X fire time
   const now = new Date();
@@ -84,7 +89,7 @@ export function scheduleAgileAligned(
 
   const next = new Date(now.getTime() + secsUntil * 1000);
   console.log(
-    `[scheduler] First price update at ${next.toLocaleTimeString()} ` +
+    `[scheduler] Next scheduled price update at ${next.toLocaleTimeString()} ` +
     `(in ${Math.round(secsUntil / 60)} min), then every 30 min`
   );
 
