@@ -13,6 +13,21 @@ export interface SavingsHistory {
   monthlySavingVsStandardPence: number;
   monthlyExportIncomePence: number;
   monthlyCo2SavedGrams: number;
+  // Self-sufficiency: accumulated Wh totals for completed days this week/month
+  weeklyGridImportWh: number;
+  weeklyConsumptionWh: number;
+  monthlyGridImportWh: number;
+  monthlyConsumptionWh: number;
+}
+
+/**
+ * Compute self-sufficiency percentage from total grid import and total consumption Wh.
+ * Returns null if consumption is zero (avoids division by zero).
+ * Clamped to [0, 100].
+ */
+export function selfSufficiencyPct(gridImportWh: number, consumptionWh: number): number | null {
+  if (consumptionWh <= 0) return null;
+  return Math.round(Math.max(0, 1 - gridImportWh / consumptionWh) * 1000) / 10;
 }
 
 function isoWeek(d: Date): string {
@@ -43,9 +58,13 @@ export function loadSavingsHistory(now = new Date()): SavingsHistory {
       monthlySavingVsStandardPence:  saved.month === month ? saved.monthlySavingVsStandardPence  : 0,
       monthlyExportIncomePence:      saved.month === month ? saved.monthlyExportIncomePence       : 0,
       monthlyCo2SavedGrams:          saved.month === month ? (saved.monthlyCo2SavedGrams ?? 0)   : 0,
+      weeklyGridImportWh:            saved.week  === week  ? (saved.weeklyGridImportWh  ?? 0)    : 0,
+      weeklyConsumptionWh:           saved.week  === week  ? (saved.weeklyConsumptionWh ?? 0)    : 0,
+      monthlyGridImportWh:           saved.month === month ? (saved.monthlyGridImportWh  ?? 0)   : 0,
+      monthlyConsumptionWh:          saved.month === month ? (saved.monthlyConsumptionWh ?? 0)   : 0,
     };
   } catch {
-    return { week, month, weeklySavingVsStandardPence: 0, weeklyExportIncomePence: 0, weeklyCo2SavedGrams: 0, monthlySavingVsStandardPence: 0, monthlyExportIncomePence: 0, monthlyCo2SavedGrams: 0 };
+    return { week, month, weeklySavingVsStandardPence: 0, weeklyExportIncomePence: 0, weeklyCo2SavedGrams: 0, monthlySavingVsStandardPence: 0, monthlyExportIncomePence: 0, monthlyCo2SavedGrams: 0, weeklyGridImportWh: 0, weeklyConsumptionWh: 0, monthlyGridImportWh: 0, monthlyConsumptionWh: 0 };
   }
 }
 
@@ -67,6 +86,40 @@ export function updateSavingsHistory(
     monthlySavingVsStandardPence:  (history.month === month ? history.monthlySavingVsStandardPence  : 0) + savingVsStandardPence,
     monthlyExportIncomePence:      (history.month === month ? history.monthlyExportIncomePence       : 0) + exportIncomePence,
     monthlyCo2SavedGrams:          (history.month === month ? history.monthlyCo2SavedGrams           : 0) + co2SavedGrams,
+    // Preserve self-sufficiency accumulators unchanged (updated separately at day rollover)
+    weeklyGridImportWh:   history.week  === week  ? (history.weeklyGridImportWh  ?? 0) : 0,
+    weeklyConsumptionWh:  history.week  === week  ? (history.weeklyConsumptionWh ?? 0) : 0,
+    monthlyGridImportWh:  history.month === month ? (history.monthlyGridImportWh  ?? 0) : 0,
+    monthlyConsumptionWh: history.month === month ? (history.monthlyConsumptionWh ?? 0) : 0,
+  };
+  try {
+    fs.writeFileSync(SAVINGS_PATH, JSON.stringify(updated), 'utf-8');
+  } catch (err) {
+    console.warn('[optimizer] Failed to persist savings history:', err);
+  }
+  return updated;
+}
+
+/**
+ * Add a completed day's grid import and consumption to the weekly/monthly self-sufficiency
+ * accumulators. Called at day rollover using the previous day's final sensor readings.
+ */
+export function updateSelfSufficiency(
+  history: SavingsHistory,
+  gridImportWh: number,
+  consumptionWh: number,
+  now = new Date()
+): SavingsHistory {
+  const week = isoWeek(now);
+  const month = isoMonth(now);
+  const updated: SavingsHistory = {
+    ...history,
+    week,
+    month,
+    weeklyGridImportWh:   (history.week  === week  ? (history.weeklyGridImportWh  ?? 0) : 0) + gridImportWh,
+    weeklyConsumptionWh:  (history.week  === week  ? (history.weeklyConsumptionWh ?? 0) : 0) + consumptionWh,
+    monthlyGridImportWh:  (history.month === month ? (history.monthlyGridImportWh  ?? 0) : 0) + gridImportWh,
+    monthlyConsumptionWh: (history.month === month ? (history.monthlyConsumptionWh ?? 0) : 0) + consumptionWh,
   };
   try {
     fs.writeFileSync(SAVINGS_PATH, JSON.stringify(updated), 'utf-8');

@@ -20,6 +20,7 @@ Every 30 minutes (aligned to Agile half-hour boundaries) it:
 - Raises the minimum discharge SoC on days with a poor solar forecast (configurable threshold)
 - Sends a HA persistent notification when upcoming Agile slots have negative prices
 - Tracks Solcast forecast accuracy over 7 and 30 days; can auto-tune the confidence factor
+- Tracks daily, weekly, and monthly self-sufficiency (% of consumption met without grid import)
 
 Solar forecasts are fetched from Solcast at scheduled times (default 06:00 and 12:00) to stay within the hobbyist API quota of 10 calls per day. Forecasts are cached to disk so the optimizer continues working across restarts and Solcast rate-limit errors.
 
@@ -139,6 +140,14 @@ If `ha_pv_daily_entity` is configured, the optimizer compares yesterday's Solcas
 |---|---|---|---|
 | `ha_pv_daily_entity` | `HA_PV_DAILY_ENTITY` | `""` | Daily PV generation entity (kWh, resets at midnight). Used to measure Solcast forecast accuracy. Leave blank to disable. |
 | `auto_tune_confidence` | `AUTO_TUNE_CONFIDENCE` | `false` | If `true`, automatically adjusts `forecast_confidence_factor` based on observed Solcast MAPE over the last 7 days. MAPE of 0% → factor 0.0, MAPE of 50% → 0.5, MAPE of 100% → 1.0. |
+
+### Self-sufficiency tracking (optional)
+
+If `ha_grid_import_daily_entity` is configured, the optimizer tracks how much of your daily electricity consumption was met without grid imports. Daily self-sufficiency is computed from the current HA sensor state each price update; weekly and monthly totals are accumulated at midnight by reading yesterday's final sensor values.
+
+| Option | Env var | Default | Description |
+|---|---|---|---|
+| `ha_grid_import_daily_entity` | `HA_GRID_IMPORT_DAILY_ENTITY` | `""` | Daily grid import sensor (kWh, resets at midnight). Used to calculate self-sufficiency. Leave blank to disable. |
 
 ### Carbon intensity (optional)
 
@@ -301,6 +310,14 @@ After each price update the following sensors are written to Home Assistant.
 | `sensor.sunsynk_optimizer_monthly_export_income` | p | Export income earned this calendar month |
 | `sensor.sunsynk_optimizer_monthly_co2_saved` | g | Estimated CO₂ saved this calendar month (gCO₂) |
 
+### Self-sufficiency (optional — requires `ha_grid_import_daily_entity`)
+
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.sunsynk_optimizer_daily_self_sufficiency` | % | Fraction of today's consumption met without grid import. 100% = fully off-grid, 0% = all power from grid. |
+| `sensor.sunsynk_optimizer_weekly_self_sufficiency` | % | Self-sufficiency for completed days this ISO week |
+| `sensor.sunsynk_optimizer_monthly_self_sufficiency` | % | Self-sufficiency for completed days this calendar month |
+
 ### Optional sensors
 
 | Entity | Unit | Description |
@@ -427,6 +444,7 @@ src/
       solcast.test.ts       Unit tests for forecast cache and accuracy helpers
       homeassistant.test.ts Unit tests for HA notification helpers
       accuracy.test.ts      Unit tests for forecast accuracy tracking
+      savings.test.ts       Unit tests for self-sufficiency helpers and accumulators
       client.reauth.test.ts Unit tests for Sunsynk client token re-auth
 config.yaml                 HA add-on manifest and schema
 Dockerfile                  Builds and runs the optimizer on node:20-alpine

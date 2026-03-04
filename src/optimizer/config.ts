@@ -40,6 +40,7 @@ export interface Config {
   backupMinSoc: number;                 // min SOC % when tomorrow solar is poor (default 40)
   haPvDailyEntity: string;             // optional — daily PV generation sensor (kWh) for forecast accuracy tracking
   autoTuneConfidence: boolean;          // if true, auto-adjust forecastConfidenceFactor from observed Solcast accuracy
+  haGridImportDailyEntity: string;     // optional — daily grid import sensor (kWh) for self-sufficiency tracking
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -87,6 +88,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     backupMinSoc: Number(o['backup_min_soc'] ?? 40),
     haPvDailyEntity: String(o['ha_pv_daily_entity'] ?? ''),
     autoTuneConfidence: String(o['auto_tune_confidence'] ?? 'false').toLowerCase() === 'true',
+    haGridImportDailyEntity: String(o['ha_grid_import_daily_entity'] ?? ''),
   };
 }
 
@@ -138,5 +140,6 @@ export function loadConfig(): Config {
     backup_min_soc: process.env.BACKUP_MIN_SOC,
     ha_pv_daily_entity: process.env.HA_PV_DAILY_ENTITY,
     auto_tune_confidence: process.env.AUTO_TUNE_CONFIDENCE,
+    ha_grid_import_daily_entity: process.env.HA_GRID_IMPORT_DAILY_ENTITY,
   });
 }

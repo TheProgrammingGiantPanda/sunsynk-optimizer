@@ -12,7 +12,7 @@ import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, getDay
 import { loadAccuracyHistory, saveAccuracyHistory, recordForecast, recordActual, getAccuracyStats, suggestConfidenceFactor, AccuracyRecord } from './accuracy';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
-import { loadSavingsHistory, updateSavingsHistory, SavingsHistory } from './savings';
+import { loadSavingsHistory, updateSavingsHistory, updateSelfSufficiency, selfSufficiencyPct, SavingsHistory } from './savings';
 import { getCarbonIntensityForecast, applyCarbonWeighting, estimateCo2SavedGrams, CarbonSlot } from './carbonintensity';
 
 // ── Daily accumulator persistence ────────────────────────────────────────────
@@ -384,6 +384,20 @@ async function main() {
       }
     }
 
+    // Read daily grid import for self-sufficiency calculation (today's running total)
+    let dailySelfSuffPct: number | null = null;
+    if (config.haGridImportDailyEntity) {
+      try {
+        const [gridImportKwh, consumptionKwh] = await Promise.all([
+          getEntityState(config.haUrl, config.haToken, config.haGridImportDailyEntity),
+          getEntityState(config.haUrl, config.haToken, config.haLoadDailyEntity),
+        ]);
+        dailySelfSuffPct = selfSufficiencyPct(Math.round(gridImportKwh * 1000), Math.round(consumptionKwh * 1000));
+      } catch (err) {
+        console.warn('[optimizer] Failed to read self-sufficiency sensors:', err);
+      }
+    }
+
     // Fetch carbon intensity — used for CO2 saving estimates and (optionally) slot scoring
     let carbonSlots: CarbonSlot[] = [];
     let carbonRates = rates;
@@ -429,6 +443,28 @@ async function main() {
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
     if (today !== accumulators.date) {
+      // Before resetting, roll yesterday's self-sufficiency into weekly/monthly accumulators
+      if (config.haGridImportDailyEntity) {
+        try {
+          const yesterday = new Date();
+          yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+          const yesterdayStr = yesterday.toISOString().slice(0, 10);
+          const [gridImportKwh, consumptionKwh] = await Promise.all([
+            getDayMaxKwh(config.haUrl, config.haToken, config.haGridImportDailyEntity, yesterdayStr),
+            getDayMaxKwh(config.haUrl, config.haToken, config.haLoadDailyEntity, yesterdayStr),
+          ]);
+          if (gridImportKwh !== null && consumptionKwh !== null) {
+            savingsHistory = updateSelfSufficiency(
+              savingsHistory,
+              Math.round(gridImportKwh * 1000),
+              Math.round(consumptionKwh * 1000)
+            );
+            console.log(`[optimizer] Self-sufficiency updated for ${yesterdayStr}: grid=${Math.round(gridImportKwh * 1000)} Wh, load=${Math.round(consumptionKwh * 1000)} Wh`);
+          }
+        } catch (err) {
+          console.error('[optimizer] Failed to update self-sufficiency accumulators:', err);
+        }
+      }
       accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0 };
     }
     accumulators.savingVsPeakPence     += result.savingVsPeakPence;
@@ -510,6 +546,15 @@ async function main() {
         ['daily_co2_saved',           ha('sensor.sunsynk_optimizer_daily_co2_saved',           accumulators.co2SavedGrams,                              { unit_of_measurement: 'g', friendly_name: 'Estimated CO₂ saved today (gCO₂)' })],
         ['weekly_co2_saved',          ha('sensor.sunsynk_optimizer_weekly_co2_saved',          savingsHistory.weeklyCo2SavedGrams,                       { unit_of_measurement: 'g', friendly_name: `Estimated CO₂ saved this week (${savingsHistory.week}, gCO₂)` })],
         ['monthly_co2_saved',         ha('sensor.sunsynk_optimizer_monthly_co2_saved',         savingsHistory.monthlyCo2SavedGrams,                      { unit_of_measurement: 'g', friendly_name: `Estimated CO₂ saved this month (${savingsHistory.month}, gCO₂)` })],
+        ...(config.haGridImportDailyEntity && dailySelfSuffPct !== null ? [['daily_self_sufficiency', ha('sensor.sunsynk_optimizer_daily_self_sufficiency', dailySelfSuffPct, { unit_of_measurement: '%', friendly_name: 'Self-sufficiency today' })] as [string, Promise<unknown>]] : []),
+        ...(() => {
+          const weeklySS = selfSufficiencyPct(savingsHistory.weeklyGridImportWh, savingsHistory.weeklyConsumptionWh);
+          const monthlySS = selfSufficiencyPct(savingsHistory.monthlyGridImportWh, savingsHistory.monthlyConsumptionWh);
+          const entries: [string, Promise<unknown>][] = [];
+          if (config.haGridImportDailyEntity && weeklySS !== null) entries.push(['weekly_self_sufficiency', ha('sensor.sunsynk_optimizer_weekly_self_sufficiency', weeklySS, { unit_of_measurement: '%', friendly_name: `Self-sufficiency this week (${savingsHistory.week})` })]);
+          if (config.haGridImportDailyEntity && monthlySS !== null) entries.push(['monthly_self_sufficiency', ha('sensor.sunsynk_optimizer_monthly_self_sufficiency', monthlySS, { unit_of_measurement: '%', friendly_name: `Self-sufficiency this month (${savingsHistory.month})` })]);
+          return entries;
+        })(),
         ...(evLoadWh > 0 ? [['ev_load',        ha('sensor.sunsynk_optimizer_ev_load',        evLoadWh,               { unit_of_measurement: 'Wh',     friendly_name: 'Estimated EV charge load to peak' })] as [string, Promise<unknown>]] : []),
         ...(exportRatePence > 0 ? [['export_rate',   ha('sensor.sunsynk_optimizer_export_rate',   exportRatePence,        { unit_of_measurement: 'p/kWh',  friendly_name: 'Effective export rate' })] as [string, Promise<unknown>]] : []),
         ['exportable_wh',    ha('sensor.sunsynk_optimizer_exportable_wh',    result.exportableWh,    { unit_of_measurement: 'Wh',     friendly_name: 'Energy available to sell to grid' })],
