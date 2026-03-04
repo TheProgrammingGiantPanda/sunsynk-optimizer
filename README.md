@@ -97,7 +97,7 @@ When an export rate is configured, the optimizer only imports grid energy cheape
 |---|---|---|---|
 | `ha_load_daily_entity` | `HA_LOAD_DAILY_ENTITY` | `sensor.solarsynkv3_…_load_daily_used` | Daily load entity used to build a per-slot consumption profile from history |
 | `consumption_average_days` | `CONSUMPTION_AVERAGE_DAYS` | `7` | Number of days of history to average for the consumption profile |
-| `avg_consumption_wh` | `AVG_CONSUMPTION_WH` | `500` | Fallback house consumption per 30-min slot (Wh) if HA history is unavailable |
+| `avg_consumption_wh` | `AVG_CONSUMPTION_WH` | `500` | Fallback house consumption per 30-min slot (Wh), used only if HA history is unavailable. The optimizer computes this automatically from history when possible; this value is a last-resort fallback. |
 
 ### Heat pump (optional)
 
@@ -223,6 +223,7 @@ After each price update the following sensors are written to Home Assistant:
 |---|---|---|
 | `sensor.sunsynk_optimizer_threshold` | p/kWh | Charge threshold set on Sunsynk |
 | `sensor.sunsynk_optimizer_effective_min_soc` | % | Active minimum discharge SoC — equals `min_discharge_soc` normally, or `backup_min_soc` when tomorrow's solar forecast is below `low_solar_threshold_wh` |
+| `sensor.sunsynk_optimizer_avg_consumption_wh` | Wh | Average house consumption per 30-min slot in use. Attribute `source` shows `"history"` (auto-derived) or `"config"` (static fallback). |
 | `sensor.sunsynk_optimizer_expensive_slots` | — | Number of upcoming expensive slots (≥ `expensive_threshold_pence`) |
 | `sensor.sunsynk_optimizer_expensive_demand_wh` | Wh | Net battery demand during all upcoming expensive slots |
 | `sensor.sunsynk_optimizer_lowest_price` | £/kWh | Cheapest Agile slot in window |

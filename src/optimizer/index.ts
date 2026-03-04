@@ -8,7 +8,7 @@ import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octo
 import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
-import { getEntityState, setState, getSlotProfileWh, createNotification, dismissNotification } from './homeassistant';
+import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, createNotification, dismissNotification } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 import { loadSavingsHistory, updateSavingsHistory, SavingsHistory } from './savings';
@@ -102,6 +102,7 @@ async function main() {
   // Daily savings accumulators — restored from disk on startup, reset when calendar date changes
   let accumulators = loadAccumulators(new Date().toISOString().slice(0, 10));
   let slotProfile: number[] | undefined;
+  let computedAvgConsumptionWh: number | null = null;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
 
@@ -143,8 +144,23 @@ async function main() {
       );
       if (profile !== null) {
         slotProfile = profile;
+        // Derive flat average from the profile for the sensor
+        computedAvgConsumptionWh = Math.round(profile.reduce((a, b) => a + b, 0) / profile.length);
       } else {
-        console.warn(`[optimizer] Not enough consumption history — using config fallback: ${config.avgConsumptionWh} Wh/slot`);
+        slotProfile = undefined;
+        // Try a flat average from history as a better fallback than the static config value
+        const historyAvg = await getAvgConsumptionWh(
+          config.haUrl, config.haToken,
+          config.haLoadDailyEntity,
+          config.consumptionAverageDays
+        );
+        if (historyAvg !== null) {
+          computedAvgConsumptionWh = historyAvg;
+          console.log(`[optimizer] Using history-derived avg consumption: ${historyAvg} Wh/slot`);
+        } else {
+          computedAvgConsumptionWh = null;
+          console.warn(`[optimizer] Not enough consumption history — using config fallback: ${config.avgConsumptionWh} Wh/slot`);
+        }
       }
     } catch (err) {
       console.error('[optimizer] Failed to build consumption profile:', err);
@@ -334,7 +350,10 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    // Use history-derived avg if available, falling back to static config
+    const effectiveAvgConsumptionWh = computedAvgConsumptionWh ?? config.avgConsumptionWh;
+
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, avgConsumptionWh: effectiveAvgConsumptionWh }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -387,6 +406,7 @@ async function main() {
       const writes: [string, Promise<unknown>][] = [
         ['threshold',          ha('sensor.sunsynk_optimizer_threshold',          result.threshold,         { unit_of_measurement: 'p/kWh',  friendly_name: 'Sunsynk charge threshold' })],
         ['effective_min_soc',  ha('sensor.sunsynk_optimizer_effective_min_soc',  effectiveMinSoc,          { unit_of_measurement: '%', friendly_name: 'Effective minimum discharge SOC' })],
+        ['avg_consumption_wh', ha('sensor.sunsynk_optimizer_avg_consumption_wh', effectiveAvgConsumptionWh, { unit_of_measurement: 'Wh', friendly_name: 'Avg house consumption per 30-min slot', source: computedAvgConsumptionWh !== null ? 'history' : 'config' })],
         ['expensive_slots',    ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` })],
         ['expensive_demand_wh', ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' })],
         ['lowest_price',       ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' })],
