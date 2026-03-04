@@ -4,11 +4,15 @@ FROM $BUILD_FROM
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev || npm ci
+# Install all deps (including devDeps) so TypeScript is available for the build
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 
 RUN npm run build
+
+# Prune dev dependencies from the final image
+RUN npm prune --omit=dev
 
 CMD ["node", "dist/optimizer/index.js"]
