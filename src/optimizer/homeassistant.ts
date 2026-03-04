@@ -194,6 +194,7 @@ export async function getSlotProfileWh(
 }
 
 const NOTIFICATION_ID = 'sunsynk_optimizer';
+export const NOTIFICATION_ID_NEGATIVE_PRICES = 'sunsynk_optimizer_negative_prices';
 
 /**
  * Creates (or replaces) a persistent notification on the HA dashboard.
@@ -202,21 +203,26 @@ export async function createNotification(
   haUrl: string,
   haToken: string,
   title: string,
-  message: string
+  message: string,
+  notificationId = NOTIFICATION_ID
 ): Promise<void> {
   await haClient(haUrl, haToken).post('/services/persistent_notification/create', {
-    notification_id: NOTIFICATION_ID,
+    notification_id: notificationId,
     title,
     message,
   });
 }
 
 /**
- * Dismisses the optimizer persistent notification (called on next successful run).
+ * Dismisses a persistent notification (defaults to the main optimizer notification).
  */
-export async function dismissNotification(haUrl: string, haToken: string): Promise<void> {
+export async function dismissNotification(
+  haUrl: string,
+  haToken: string,
+  notificationId = NOTIFICATION_ID
+): Promise<void> {
   await haClient(haUrl, haToken).post('/services/persistent_notification/dismiss', {
-    notification_id: NOTIFICATION_ID,
+    notification_id: notificationId,
   });
 }
 

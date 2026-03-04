@@ -17,6 +17,8 @@ Every 30 minutes (aligned to Agile half-hour boundaries) it:
 
 Solar forecasts are fetched from Solcast at scheduled times (default 06:00 and 12:00) to stay within the hobbyist API quota of 10 calls per day. Forecasts are cached to disk so the optimizer continues working across restarts and Solcast rate-limit errors.
 
+When upcoming Agile slots have negative prices (you are paid to consume), a Home Assistant persistent notification is raised automatically listing the affected slots. It is dismissed on the next price update once negative slots have passed.
+
 ---
 
 ## Requirements

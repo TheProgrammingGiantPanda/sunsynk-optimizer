@@ -8,7 +8,7 @@ import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octo
 import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
-import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, createNotification, dismissNotification } from './homeassistant';
+import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, createNotification, dismissNotification, NOTIFICATION_ID_NEGATIVE_PRICES } from './homeassistant';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 import { loadSavingsHistory, updateSavingsHistory, SavingsHistory } from './savings';
@@ -235,6 +235,31 @@ async function main() {
     } catch (err) {
       console.error('[optimizer] Failed to get Agile rates:', err);
       return;
+    }
+
+    // Notify when upcoming Agile slots have negative prices
+    {
+      const now = new Date();
+      const negativeSlots = rates
+        .filter(r => new Date(r.valid_from) >= now && r.value_inc_vat < 0)
+        .sort((a, b) => new Date(a.valid_from).getTime() - new Date(b.valid_from).getTime());
+
+      if (negativeSlots.length > 0) {
+        const lines = negativeSlots.map(r => {
+          const from = new Date(r.valid_from).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+          const to   = new Date(r.valid_to).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+          return `- ${from}–${to}: ${r.value_inc_vat.toFixed(2)}p/kWh`;
+        });
+        console.log(`[optimizer] ${negativeSlots.length} negative-price slot(s) upcoming — notifying HA`);
+        createNotification(
+          config.haUrl, config.haToken,
+          `⚡ Negative Agile prices — ${negativeSlots.length} slot(s)`,
+          `Upcoming negative-price slots (charge discretionary loads now):\n\n${lines.join('\n')}`,
+          NOTIFICATION_ID_NEGATIVE_PRICES
+        ).catch(() => {});
+      } else {
+        dismissNotification(config.haUrl, config.haToken, NOTIFICATION_ID_NEGATIVE_PRICES).catch(() => {});
+      }
     }
 
     // Resolve effective export rate: Outgoing Agile schedule > fixed schedule > 0
