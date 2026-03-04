@@ -26,6 +26,7 @@ export interface Config {
   haHeatPumpEntity: string;
   haOutdoorTempEntity: string;
   standardTariffPence: number;
+  haEvChargerEntity: string;
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -59,6 +60,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     haHeatPumpEntity: String(o['ha_heat_pump_entity'] ?? ''),
     haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
     standardTariffPence: Number(o['standard_tariff_pence'] ?? 24),
+    haEvChargerEntity: String(o['ha_ev_charger_entity'] ?? ''),
   };
 }
 
@@ -96,5 +98,6 @@ export function loadConfig(): Config {
     ha_heat_pump_entity: process.env.HA_HEAT_PUMP_ENTITY,
     ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
     standard_tariff_pence: process.env.STANDARD_TARIFF_PENCE,
+    ha_ev_charger_entity: process.env.HA_EV_CHARGER_ENTITY,
   });
 }

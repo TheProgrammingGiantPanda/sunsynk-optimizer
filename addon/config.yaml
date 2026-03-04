@@ -37,6 +37,7 @@ options:
   ha_heat_pump_entity: "sensor.main_heat_pump_total_electricity_consumption_kwh"
   ha_outdoor_temp_entity: "sensor.main_heat_pump_outdoor_temperature"
   standard_tariff_pence: 24
+  ha_ev_charger_entity: "sensor.go2_andi_charge_power"
 schema:
   sunsynk_username: str
   sunsynk_password: password
@@ -62,3 +63,4 @@ schema:
   ha_heat_pump_entity: str
   ha_outdoor_temp_entity: str
   standard_tariff_pence: float
+  ha_ev_charger_entity: str

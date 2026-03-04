@@ -20,6 +20,7 @@ export interface CalculationResult {
   savingVsPeakPence: number;       // saving vs buying all energy at peak-hour Agile price
   savingVsStandardPence: number;   // saving vs buying all energy at the standard tariff rate
   pvSavingPence: number;           // saving from not needing to buy slots that solar covers
+  evLoadWh: number;                // estimated EV charge load in the window (Wh)
 }
 
 /**
@@ -36,7 +37,8 @@ export function calculate(
   pvForecasts: ForecastSlot[],
   agileRates: PriceSlot[],
   slotProfile?: number[],      // 48-element Wh per slot (index 0 = 00:00–00:30 UTC); falls back to config.avgConsumptionWh
-  hpAdjustment?: number[]      // 48-element Wh adjustment for heat pump temperature deviation
+  hpAdjustment?: number[],     // 48-element Wh adjustment for heat pump temperature deviation
+  evLoadWh = 0                 // estimated EV charge energy to add to house load (Wh)
 ): CalculationResult {
   const now = new Date();
 
@@ -83,6 +85,9 @@ export function calculate(
     pvTotalP50  += slot.pv_estimate       * WH_PER_KW_HALF_HOUR;
     houseUsage  += slotConsumption(slotEnd);
   }
+
+  // Add EV load to house usage — treated identically to any other load in the window
+  houseUsage += evLoadWh;
 
   // ── 2. How much battery capacity remains to be filled? ───────────────────
   const batteryWatts = (config.batteryCapacityWh * batteryPct) / 100;
@@ -179,5 +184,6 @@ export function calculate(
     savingVsPeakPence:     Math.round(savingVsPeakPence * 10) / 10,
     savingVsStandardPence: Math.round(savingVsStandardPence * 10) / 10,
     pvSavingPence:         Math.round(pvSavingPence * 10) / 10,
+    evLoadWh:              Math.round(evLoadWh),
   };
 }

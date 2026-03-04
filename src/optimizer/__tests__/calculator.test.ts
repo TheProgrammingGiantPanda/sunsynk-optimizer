@@ -32,6 +32,7 @@ const BASE_CONFIG: Config = {
   haHeatPumpEntity: '',
   haOutdoorTempEntity: '',
   standardTariffPence: 24,
+  haEvChargerEntity: '',
 };
 
 /** Build a 30-min price slot starting offsetHours after NOW */
@@ -143,6 +144,21 @@ describe('calculate', () => {
     // No PV → no surplus → pvSaving = 0
     const result = calculate(BASE_CONFIG, 50, [], RATES);
     expect(result.pvSavingPence).toBe(0);
+  });
+
+  it('adds evLoadWh to houseUsage and increases blocks needed', () => {
+    // Without EV: battery 50%, batteryToFill=5000 → 2 blocks
+    // With 5000 Wh EV load: houseUsage += 5000, surplus=-5000, batteryToFill=10000 → 4 blocks
+    const without = calculate(BASE_CONFIG, 50, [], RATES);
+    const withEv  = calculate(BASE_CONFIG, 50, [], RATES, undefined, undefined, 5000);
+    expect(withEv.evLoadWh).toBe(5000);
+    expect(withEv.houseUsage).toBe(without.houseUsage + 5000);
+    expect(withEv.blocks).toBeGreaterThan(without.blocks);
+  });
+
+  it('evLoadWh defaults to zero with no EV load', () => {
+    const result = calculate(BASE_CONFIG, 50, [], RATES);
+    expect(result.evLoadWh).toBe(0);
   });
 
   it('pushes peak to tomorrow if peakHour has already passed today', () => {

@@ -176,7 +176,26 @@ async function main() {
       }
     }
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment);
+    // Estimate EV load to peak if charger is actively drawing power
+    let evLoadWh = 0;
+    if (config.haEvChargerEntity) {
+      try {
+        const chargePowerKw = await getEntityState(config.haUrl, config.haToken, config.haEvChargerEntity);
+        if (chargePowerKw > 0.1) {
+          const now = new Date();
+          const peakTime = new Date(now);
+          peakTime.setHours(config.peakHour, 0, 0, 0);
+          if (peakTime <= now) peakTime.setDate(peakTime.getDate() + 1);
+          const hoursTopeak = (peakTime.getTime() - now.getTime()) / 3600000;
+          evLoadWh = Math.round(chargePowerKw * hoursTopeak * 1000);
+          console.log(`[optimizer] EV charging at ${chargePowerKw} kW, estimated ${evLoadWh} Wh to peak`);
+        }
+      } catch (err) {
+        console.warn('[optimizer] Failed to read EV charger entity, assuming not charging:', err);
+      }
+    }
+
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh }, batteryPct, pvForecasts, rates, slotProfile, hpAdjustment, evLoadWh);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -227,6 +246,7 @@ async function main() {
         ha('sensor.sunsynk_optimizer_daily_saving_vs_peak',     Math.round(dailySavingVsPeakPence),     { unit_of_measurement: 'p', friendly_name: 'Daily saving vs peak-hour Agile (today)' }),
         ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(dailySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` }),
         ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(dailyPvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' }),
+        ...(evLoadWh > 0 ? [ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] : []),
         ...(hpAdjustment ? [ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
           { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }
