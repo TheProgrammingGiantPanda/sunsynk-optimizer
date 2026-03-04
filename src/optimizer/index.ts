@@ -38,6 +38,8 @@ async function main() {
   console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
   console.log(`[optimizer] Forecast fetch times: ${config.forecastFetchTimes.join(', ')}`);
+  if (config.exportTariffSchedule) console.log(`[optimizer] Fixed export tariff: ${config.exportTariffSchedule}`);
+  if (config.octopusExportProduct) console.log(`[optimizer] Outgoing Agile export: ${config.octopusExportProduct} / ${config.octopusExportTariff}`);
   console.log(`[optimizer] Price updates: aligned to Agile half-hour boundaries (+2 min offset)`);
 
   const client = new SunsyncClient();
@@ -264,7 +266,10 @@ async function main() {
     dailyPvSavingPence         += result.pvSavingPence;
 
     try {
-      await client.setMinCharge(plantId, result.threshold, result.sellThreshold);
+      // Pass sellThreshold whenever export is configured so direction=0 is always kept in sync.
+      // 0 = no surplus/not profitable → setMinCharge writes 999p to disable selling.
+      const exportConfigured = exportRatePence > 0 || exportRates.length > 0;
+      await client.setMinCharge(plantId, result.threshold, exportConfigured ? result.sellThreshold : undefined);
       console.log(
         `[${new Date().toISOString()}] Set min charge threshold to ${result.threshold}p ` +
         `(battery ${batteryPct}%)`

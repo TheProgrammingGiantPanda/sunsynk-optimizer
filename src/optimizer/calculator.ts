@@ -158,11 +158,7 @@ export function calculate(
   const batteryToFillNoPV = Math.max(0, totalExpensiveDemandNoPV - batteryWatts);
 
   // ── 6. Pick cheapest cheap slots to fill the battery ─────────────────────
-  // Further filter: don't import above export break-even when export rate is configured
-  const importCandidates = (exportRatePence > 0
-    ? cheapRates.filter(r => r.value_inc_vat < exportRatePence * eff)
-    : cheapRates
-  ).sort((a, b) => a.value_inc_vat - b.value_inc_vat);
+  const importCandidates = [...cheapRates].sort((a, b) => a.value_inc_vat - b.value_inc_vat);
 
   const windowRates = [...allRates].sort((a, b) => a.value_inc_vat - b.value_inc_vat);
   const lowestPrice = windowRates.length > 0 ? windowRates[0].value_inc_vat / 100 : 0;

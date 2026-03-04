@@ -129,7 +129,7 @@ export default class SunsyncClient {
   async setMinCharge(
     plantId: string | number,
     minPricePence: number | string,
-    sellThreshold = 0,
+    sellThreshold?: number,   // undefined = don't touch; 0 = disable (set 9999); >0 = enable at this price
     options: { token?: string } = {}
   ): Promise<any> {
     const token = options.token || this.token;
@@ -145,25 +145,28 @@ export default class SunsyncClient {
 
     const products: any[] = plant?.products ?? [];
 
-    // Update ratesThreshold for direction=1 (import/buy rate threshold)
+    // Update ratesThreshold for direction=1 (Charge Battery — import price threshold).
+    // Spread the existing product to preserve provider, regionId, limitSoc etc.
     const updatedProducts = products.map((p: any) =>
       p.direction === 1 ? { ...p, ratesThreshold: String(minPricePence) } : p
     );
     if (!products.some((p: any) => p.direction === 1)) {
-      updatedProducts.push({ direction: 1, ratesThreshold: String(minPricePence) });
+      console.warn('[optimizer] direction=1 product not found in plant — charge threshold not set');
     }
 
-    // Update ratesThreshold for direction=2 (export/sell rate threshold).
-    // 9999 effectively disables selling; a real value enables it above that price.
-    // NOTE: direction=2 behaviour is inferred from the direction=1 pattern and needs live API verification.
-    const sellThresholdStr = sellThreshold > 0 ? String(sellThreshold) : '9999';
-    const dir2Idx = updatedProducts.findIndex((p: any) => p.direction === 2);
-    if (dir2Idx >= 0) {
-      updatedProducts[dir2Idx] = { ...updatedProducts[dir2Idx], ratesThreshold: sellThresholdStr };
-    } else {
-      updatedProducts.push({ direction: 2, ratesThreshold: sellThresholdStr });
+    // Update ratesThreshold for direction=0 (Dis-Charge Battery — sell price threshold).
+    // Only update when export is configured (sellThreshold !== undefined).
+    // 999 effectively disables selling (Agile never reaches that price); a real value enables it.
+    if (sellThreshold !== undefined) {
+      const sellThresholdStr = sellThreshold > 0 ? String(sellThreshold) : '999';
+      const dir0Idx = updatedProducts.findIndex((p: any) => p.direction === 0);
+      if (dir0Idx >= 0) {
+        updatedProducts[dir0Idx] = { ...updatedProducts[dir0Idx], ratesThreshold: sellThresholdStr };
+        console.log(`[optimizer] Sell threshold → ${sellThresholdStr}p (direction=0)`);
+      } else {
+        console.warn('[optimizer] direction=0 product not found in plant — sell threshold not set');
+      }
     }
-    console.log(`[optimizer] Sell threshold set to ${sellThresholdStr}p (direction=2) — NOTE: requires Sunsynk API verification`);
 
     // Strip server-generated fields from charges
     const charges = (plant?.charges ?? []).map(({ price, type, startRange, endRange }: any) => ({
@@ -184,6 +187,7 @@ export default class SunsyncClient {
         payload,
         { headers: { ...this._authHeaders(token), 'Content-Type': 'application/json' } }
       );
+      console.log(`[optimizer] income API response: ${JSON.stringify(res.data)}`);
       return res.data;
     } catch (err: any) {
       if (err.response) {

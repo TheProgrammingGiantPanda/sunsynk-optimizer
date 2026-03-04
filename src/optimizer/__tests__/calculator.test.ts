@@ -214,12 +214,12 @@ describe('calculate — core behaviour', () => {
     expect(result.exportRatePence).toBe(12);
   });
 
-  it('filters out cheap slots above the export break-even', () => {
-    // exportRate=12p, eff=1.0 → break-even=12p; only slots <12p are import candidates
-    // cheap slots (10p–19p) filtered to [10p, 11p]; battery=0% needs 3000 Wh → 2 blocks
+  it('export rate does not filter import candidates', () => {
+    // exportRate=12p — all cheap slots remain candidates regardless of export break-even
     const result = calculate(BASE_CONFIG, 0, [], RATES, undefined, undefined, 0, 12);
-    // threshold capped at 11p (below break-even of 12p)
-    expect(result.threshold).toBeLessThan(12);
+    const resultNoExport = calculate(BASE_CONFIG, 0, [], RATES);
+    expect(result.blocks).toBe(resultNoExport.blocks);
+    expect(result.threshold).toBe(resultNoExport.threshold);
   });
 
   it('efficiency increases blocks needed', () => {
