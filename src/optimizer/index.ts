@@ -27,6 +27,7 @@ interface DailyAccumulators {
   pvSavingPence: number;
   exportIncomePence: number;
   co2SavedGrams: number;
+  actualGridCostPence: number;
 }
 
 function loadAccumulators(today: string): DailyAccumulators {
@@ -40,7 +41,7 @@ function loadAccumulators(today: string): DailyAccumulators {
   } catch {
     // No file or parse error — start fresh
   }
-  return { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0 };
+  return { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0, actualGridCostPence: 0 };
 }
 
 function saveAccumulators(acc: DailyAccumulators): void {
@@ -77,7 +78,7 @@ async function main() {
     throw new Error(`Invalid config: expensiveThresholdPence must be a positive number (got ${config.expensiveThresholdPence})`);
 
   console.log('================================================');
-  console.log('  Sunsynk Battery Optimizer  v1.7.0  starting  ');
+  console.log('  Sunsynk Battery Optimizer  v1.7.2  starting  ');
   console.log('================================================');
   console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
@@ -116,6 +117,9 @@ async function main() {
   // Last values sent to Sunsynk — skip API call when unchanged
   let lastThreshold: number | null = null;
   let lastSellThreshold: number | null = null;
+
+  // Last grid import reading — used to compute per-slot delta for actual cost tracking
+  let lastGridImportKwh: number | null = null;
 
   // Weekly / monthly savings history — persisted across restarts
   let savingsHistory: SavingsHistory = loadSavingsHistory();
@@ -395,14 +399,16 @@ async function main() {
       }
     }
 
-    // Read daily grid import for self-sufficiency calculation (today's running total)
+    // Read daily grid import — used for self-sufficiency and actual cost tracking
     let dailySelfSuffPct: number | null = null;
+    let currentGridImportKwh: number | null = null;
     if (config.haGridImportDailyEntity) {
       try {
         const [gridImportKwh, consumptionKwh] = await Promise.all([
           getEntityState(config.haUrl, config.haToken, config.haGridImportDailyEntity),
           getEntityState(config.haUrl, config.haToken, config.haLoadDailyEntity),
         ]);
+        currentGridImportKwh = gridImportKwh;
         dailySelfSuffPct = selfSufficiencyPct(Math.round(gridImportKwh * 1000), Math.round(consumptionKwh * 1000));
       } catch (err) {
         console.warn('[optimizer] Failed to read self-sufficiency sensors:', err);
@@ -476,7 +482,8 @@ async function main() {
           console.error('[optimizer] Failed to update self-sufficiency accumulators:', err);
         }
       }
-      accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0 };
+      accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0, actualGridCostPence: 0 };
+      lastGridImportKwh = null; // reset on day rollover so delta is clean
     }
     accumulators.savingVsPeakPence     += result.savingVsPeakPence;
     accumulators.savingVsStandardPence += result.savingVsStandardPence;
@@ -484,6 +491,18 @@ async function main() {
     if (result.sellThreshold > 0) accumulators.exportIncomePence += result.exportIncomePence;
     const co2SavedGrams = estimateCo2SavedGrams(rates, carbonSlots, expensiveThresholdPence, result.blocks, config.batteryFillRateWh);
     accumulators.co2SavedGrams += co2SavedGrams;
+
+    // Actual grid cost: delta in grid import kWh this slot × current import rate
+    if (currentGridImportKwh !== null) {
+      if (lastGridImportKwh !== null) {
+        const deltaKwh = Math.max(0, currentGridImportKwh - lastGridImportKwh);
+        const now = new Date();
+        const currentRate = rates.find(r => new Date(r.valid_from) <= now && new Date(r.valid_to) > now)?.value_inc_vat ?? 0;
+        accumulators.actualGridCostPence += deltaKwh * currentRate;
+      }
+      lastGridImportKwh = currentGridImportKwh;
+    }
+
     saveAccumulators(accumulators);
 
     // Update weekly / monthly accumulators
@@ -550,6 +569,7 @@ async function main() {
         ['daily_saving_vs_standard', ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` })],
         ['daily_pv_saving',          ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' })],
         ['daily_export_income',      ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' })],
+        ...(config.haGridImportDailyEntity ? [['daily_actual_grid_cost', ha('sensor.sunsynk_optimizer_daily_actual_grid_cost', Math.round(accumulators.actualGridCostPence), { unit_of_measurement: 'p', friendly_name: 'Actual grid import cost today' })] as [string, Promise<unknown>]] : []),
         ['weekly_saving_vs_standard', ha('sensor.sunsynk_optimizer_weekly_saving_vs_standard', Math.round(savingsHistory.weeklySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Weekly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.week})` })],
         ['weekly_export_income',      ha('sensor.sunsynk_optimizer_weekly_export_income',      Math.round(savingsHistory.weeklyExportIncomePence),      { unit_of_measurement: 'p', friendly_name: `Weekly export income (${savingsHistory.week})` })],
         ['monthly_saving_vs_standard', ha('sensor.sunsynk_optimizer_monthly_saving_vs_standard', Math.round(savingsHistory.monthlySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Monthly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.month})` })],
