@@ -1,5 +1,5 @@
 name: "Sunsynk Optimizer"
-version: "1.6.2"
+version: "1.7.0"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
 url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
@@ -52,6 +52,7 @@ options:
   ha_pv_daily_entity: ""
   auto_tune_confidence: false
   ha_grid_import_daily_entity: ""
+  tou_rates: ""
 schema:
   sunsynk_username: str
   sunsynk_password: password
@@ -92,3 +93,4 @@ schema:
   ha_pv_daily_entity: str?
   auto_tune_confidence: bool?
   ha_grid_import_daily_entity: str?
+  tou_rates: str?

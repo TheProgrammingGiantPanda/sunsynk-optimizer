@@ -41,6 +41,7 @@ export interface Config {
   haPvDailyEntity: string;             // optional — daily PV generation sensor (kWh) for forecast accuracy tracking
   autoTuneConfidence: boolean;          // if true, auto-adjust forecastConfidenceFactor from observed Solcast accuracy
   haGridImportDailyEntity: string;     // optional — daily grid import sensor (kWh) for self-sufficiency tracking
+  touRates: string;                    // optional — TOU schedule "HH:MM-HH:MM:PRICE,..." (replaces Agile fetch)
 }
 
 function fromOptions(o: Record<string, unknown>): Config {
@@ -89,6 +90,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     haPvDailyEntity: String(o['ha_pv_daily_entity'] ?? ''),
     autoTuneConfidence: String(o['auto_tune_confidence'] ?? 'false').toLowerCase() === 'true',
     haGridImportDailyEntity: String(o['ha_grid_import_daily_entity'] ?? ''),
+    touRates: String(o['tou_rates'] ?? ''),
   };
 }
 
@@ -141,5 +143,6 @@ export function loadConfig(): Config {
     ha_pv_daily_entity: process.env.HA_PV_DAILY_ENTITY,
     auto_tune_confidence: process.env.AUTO_TUNE_CONFIDENCE,
     ha_grid_import_daily_entity: process.env.HA_GRID_IMPORT_DAILY_ENTITY,
+    tou_rates: process.env.TOU_RATES,
   });
 }

@@ -4,7 +4,7 @@ import path from 'path';
 import SunsyncClient from '../index';
 import { loadConfig } from './config';
 import { getMergedForecast, loadForecastCache, ForecastSlot, tomorrowPvWh, dailyPvWhByDate } from './solcast';
-import { getAgileRates, getFixedExportRate, getOutgoingAgileRates } from './octopus';
+import { getAgileRates, getFixedExportRate, getOutgoingAgileRates, getTouRates } from './octopus';
 import { PriceSlot } from './octopus';
 import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
@@ -80,6 +80,10 @@ async function main() {
   console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
   console.log(`[optimizer] Forecast fetch times: ${config.forecastFetchTimes.join(', ')}`);
+  if (config.touRates) {
+    console.log(`[optimizer] TOU schedule active — Agile rates will not be fetched`);
+    if (config.octopusProduct) console.log(`[optimizer] WARNING: tou_rates is set; octopus_product/tariff will be ignored`);
+  }
   if (config.exportTariffSchedule) console.log(`[optimizer] Fixed export tariff: ${config.exportTariffSchedule}`);
   if (config.octopusExportProduct) console.log(`[optimizer] Outgoing Agile export: ${config.octopusExportProduct} / ${config.octopusExportTariff}`);
   console.log(`[optimizer] Price updates: aligned to Agile half-hour boundaries (+2 min offset)`);
@@ -273,16 +277,21 @@ async function main() {
         `capacity=${batteryCapacityWh} Wh, fill rate=${batteryFillRateWh} Wh/slot`);
     }
 
-    let rates;
+    let rates: PriceSlot[];
     try {
-      rates = await getAgileRates(config.octopusProduct, config.octopusTariff);
+      if (config.touRates) {
+        rates = getTouRates(config.touRates);
+        console.log(`[optimizer] Using TOU schedule (${rates.length} synthesised slots)`);
+      } else {
+        rates = await getAgileRates(config.octopusProduct, config.octopusTariff);
+      }
     } catch (err) {
-      console.error('[optimizer] Failed to get Agile rates:', err);
+      console.error('[optimizer] Failed to get rates:', err);
       return;
     }
 
-    // Notify when upcoming Agile slots have negative prices
-    {
+    // Notify when upcoming Agile slots have negative prices (Agile only — TOU rates are never negative)
+    if (!config.touRates) {
       const now = new Date();
       const negativeSlots = rates
         .filter(r => new Date(r.valid_from) >= now && r.value_inc_vat < 0)
