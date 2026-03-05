@@ -76,7 +76,9 @@ async function main() {
   if (isNaN(config.expensiveThresholdPence) || config.expensiveThresholdPence <= 0)
     throw new Error(`Invalid config: expensiveThresholdPence must be a positive number (got ${config.expensiveThresholdPence})`);
 
-  console.log('[optimizer] Starting Sunsynk Battery Optimizer');
+  console.log('================================================');
+  console.log('  Sunsynk Battery Optimizer  v1.7.0  starting  ');
+  console.log('================================================');
   console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
   console.log(`[optimizer] Forecast fetch times: ${config.forecastFetchTimes.join(', ')}`);
