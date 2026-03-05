@@ -63,7 +63,7 @@ function pvForSlot(
   confidenceFactor: number
 ): number {
   const slot = pvForecasts.find(
-    s => Math.abs(new Date(s.period_end).getTime() - slotEnd.getTime()) < 60000
+    s => Math.abs(new Date(s.period_end).getTime() - slotEnd.getTime()) < 300000
   );
   return slot ? adjustedEstimate(slot, confidenceFactor) * WH_PER_KW_HALF_HOUR : 0;
 }
@@ -71,7 +71,7 @@ function pvForSlot(
 /** P50 PV generation (Wh) for the 30-min slot ending at slotEnd. */
 function pvP50ForSlot(pvForecasts: ForecastSlot[], slotEnd: Date): number {
   const slot = pvForecasts.find(
-    s => Math.abs(new Date(s.period_end).getTime() - slotEnd.getTime()) < 60000
+    s => Math.abs(new Date(s.period_end).getTime() - slotEnd.getTime()) < 300000
   );
   return slot ? slot.pv_estimate * WH_PER_KW_HALF_HOUR : 0;
 }
