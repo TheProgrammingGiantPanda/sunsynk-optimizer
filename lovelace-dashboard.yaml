@@ -66,25 +66,30 @@ views:
 
           - type: glance
             title: Current Agile window
-            columns: 2
+            columns: 3
             entities:
-              - entity: sensor.sunsynk_optimizer_expensive_slots
-                name: Expensive slots
-                icon: mdi:lightning-bolt
-              - entity: sensor.sunsynk_optimizer_blocks
-                name: Slots to buy
-                icon: mdi:battery-charging
+              - entity: sensor.sunsynk_optimizer_current_price
+                name: Current price
+                icon: mdi:lightning-bolt-circle
               - entity: sensor.sunsynk_optimizer_lowest_price
                 name: Lowest price
                 icon: mdi:tag-arrow-down
               - entity: sensor.sunsynk_optimizer_peak_slot_price
                 name: Peak price
                 icon: mdi:tag-arrow-up
+              - entity: sensor.sunsynk_optimizer_expensive_slots
+                name: Expensive slots
+                icon: mdi:lightning-bolt
+              - entity: sensor.sunsynk_optimizer_blocks
+                name: Slots to buy
+                icon: mdi:battery-charging
 
           - type: history-graph
             title: Thresholds (past 24 h)
             hours_to_show: 24
             entities:
+              - entity: sensor.sunsynk_optimizer_current_price
+                name: Current
               - entity: sensor.sunsynk_optimizer_threshold
                 name: Charge
               - entity: sensor.sunsynk_optimizer_sell_threshold

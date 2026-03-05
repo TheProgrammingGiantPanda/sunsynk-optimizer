@@ -492,13 +492,15 @@ async function main() {
     const co2SavedGrams = estimateCo2SavedGrams(rates, carbonSlots, expensiveThresholdPence, result.blocks, config.batteryFillRateWh);
     accumulators.co2SavedGrams += co2SavedGrams;
 
+    // Current import rate for this slot
+    const now = new Date();
+    const currentRatePence = rates.find(r => new Date(r.valid_from) <= now && new Date(r.valid_to) > now)?.value_inc_vat ?? null;
+
     // Actual grid cost: delta in grid import kWh this slot × current import rate
     if (currentGridImportKwh !== null) {
-      if (lastGridImportKwh !== null) {
+      if (lastGridImportKwh !== null && currentRatePence !== null) {
         const deltaKwh = Math.max(0, currentGridImportKwh - lastGridImportKwh);
-        const now = new Date();
-        const currentRate = rates.find(r => new Date(r.valid_from) <= now && new Date(r.valid_to) > now)?.value_inc_vat ?? 0;
-        accumulators.actualGridCostPence += deltaKwh * currentRate;
+        accumulators.actualGridCostPence += deltaKwh * currentRatePence;
       }
       lastGridImportKwh = currentGridImportKwh;
     }
@@ -554,6 +556,7 @@ async function main() {
         ['expensive_slots',    ha('sensor.sunsynk_optimizer_expensive_slots',    result.expensiveSlots,    { friendly_name: `Upcoming expensive slots (≥${config.expensiveThresholdPence}p)` })],
         ['expensive_demand_wh', ha('sensor.sunsynk_optimizer_expensive_demand_wh', result.totalExpensiveDemandWh, { unit_of_measurement: 'Wh', friendly_name: 'Battery demand during expensive slots' })],
         ['lowest_price',       ha('sensor.sunsynk_optimizer_lowest_price',       result.lowestPrice,        { unit_of_measurement: '£/kWh',  friendly_name: 'Agile lowest price in window' })],
+        ...(currentRatePence !== null ? [['current_price', ha('sensor.sunsynk_optimizer_current_price', currentRatePence, { unit_of_measurement: 'p/kWh', friendly_name: 'Current Agile import price' })] as [string, Promise<unknown>]] : []),
         ['pv_total',           ha('sensor.sunsynk_optimizer_pv_total',           result.pvTotal,            { unit_of_measurement: 'Wh', friendly_name: 'Total PV forecast over remaining Agile horizon (confidence-adjusted)' })],
         ['pv_total_p50',       ha('sensor.sunsynk_optimizer_pv_total_p50',       result.pvTotalP50,         { unit_of_measurement: 'Wh', friendly_name: 'Total PV forecast over remaining Agile horizon (p50)' })],
         ['house_usage',        ha('sensor.sunsynk_optimizer_house_usage',        result.houseUsage,         { unit_of_measurement: 'Wh',     friendly_name: 'Projected house consumption over remaining Agile horizon (resets when new rates published)' })],
