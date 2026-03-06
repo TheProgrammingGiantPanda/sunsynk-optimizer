@@ -6,8 +6,9 @@
 # 2. Open the new dashboard, click ⋮ (three dots) → Edit → Raw configuration editor
 # 3. Select all, delete, paste this entire file and save.
 #
-# REQUIRED: Replace the battery SOC entity (marked with ★) with your actual Sunsynk SOC sensor.
-#           All other entities are created automatically by the optimizer add-on.
+# REQUIRED: Replace entities marked with ★ with your actual Sunsynk sensor names:
+#   ★ Battery SOC  — gauge in the Overview view
+#   ★ Actual PV    — "PV forecast vs actual" graphs (daily PV generation sensor)
 
 title: Sunsynk Optimizer
 views:
@@ -230,15 +231,14 @@ views:
                 icon: mdi:home-battery
 
           - type: history-graph
-            title: PV forecast vs usage (past 24 h)
-            hours_to_show: 24
+            title: PV forecast vs actual (past 7 days)
+            hours_to_show: 168
             entities:
-              - entity: sensor.sunsynk_optimizer_pv_total
-                name: PV (adjusted)
-              - entity: sensor.sunsynk_optimizer_pv_total_p50
-                name: PV p50
-              - entity: sensor.sunsynk_optimizer_house_usage
-                name: House usage
+              - entity: sensor.sunsynk_optimizer_today_pv_forecast_wh
+                name: PV forecast (P50)
+              # ★ Replace with your Sunsynk daily PV generation sensor
+              - entity: sensor.solarsynkv3_2310140043_pv_power_today
+                name: Actual PV
 
   # ════════════════════════════════════════════════════════════════
   #  VIEW 2: Savings
@@ -351,15 +351,14 @@ views:
 
       - cards:
           - type: history-graph
-            title: PV forecast vs house usage (past 24 h)
-            hours_to_show: 24
+            title: PV forecast vs actual (past 7 days)
+            hours_to_show: 168
             entities:
-              - entity: sensor.sunsynk_optimizer_pv_total
-                name: PV forecast (adjusted)
-              - entity: sensor.sunsynk_optimizer_pv_total_p50
-                name: PV p50
-              - entity: sensor.sunsynk_optimizer_house_usage
-                name: House usage
+              - entity: sensor.sunsynk_optimizer_today_pv_forecast_wh
+                name: PV forecast (P50)
+              # ★ Replace with your Sunsynk daily PV generation sensor
+              - entity: sensor.solarsynkv3_2310140043_pv_power_today
+                name: Actual PV
 
           - type: history-graph
             title: Battery charge & grid import (past 24 h)
