@@ -36,6 +36,8 @@ function loadAccumulators(today: string): DailyAccumulators {
     const saved: DailyAccumulators = JSON.parse(raw);
     if (saved.date === today) {
       console.log(`[optimizer] Restored daily accumulators for ${today} from disk`);
+      // Default any fields added after the file was first written
+      saved.actualGridCostPence ??= 0;
       return saved;
     }
   } catch {
