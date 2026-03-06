@@ -114,7 +114,8 @@ export async function getSlotProfileWh(
   haUrl: string,
   haToken: string,
   entityId: string,
-  days = 7
+  days = 7,
+  label = 'consumption'
 ): Promise<number[] | null> {
   const start = new Date();
   start.setDate(start.getDate() - (days + 1));
@@ -186,7 +187,7 @@ export async function getSlotProfileWh(
 
   const dailyTotal = (profile.reduce((a, b) => a + b, 0) / 1000).toFixed(1);
   console.log(
-    `[homeassistant] Slot profile built from ${byDate.size} days ` +
+    `[homeassistant] ${label} slot profile built from ${byDate.size} days ` +
     `(implied daily total: ${dailyTotal} kWh)`
   );
 

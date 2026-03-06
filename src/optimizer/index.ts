@@ -157,7 +157,8 @@ async function main() {
       const profile = await getSlotProfileWh(
         config.haUrl, config.haToken,
         config.haLoadDailyEntity,
-        config.consumptionAverageDays
+        config.consumptionAverageDays,
+        'house consumption'
       );
       if (profile !== null) {
         slotProfile = profile;
@@ -186,7 +187,7 @@ async function main() {
     if (config.haHeatPumpEntity) {
       try {
         const [hpProfile, model] = await Promise.all([
-          getSlotProfileWh(config.haUrl, config.haToken, config.haHeatPumpEntity, config.consumptionAverageDays),
+          getSlotProfileWh(config.haUrl, config.haToken, config.haHeatPumpEntity, config.consumptionAverageDays, 'heat pump'),
           buildHeatPumpModel(config.haUrl, config.haToken, config.haHeatPumpEntity, config.haOutdoorTempEntity, config.consumptionAverageDays),
         ]);
         if (hpProfile) hpSlotProfile = hpProfile;
