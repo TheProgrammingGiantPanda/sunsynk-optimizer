@@ -173,13 +173,13 @@ views:
                 icon: mdi:currency-gbp
 
           - type: entities
-            title: Today's savings
+            title: Today
             entities:
               - entity: sensor.sunsynk_optimizer_daily_saving_vs_standard
-                name: vs standard tariff
+                name: Saving vs standard
                 icon: mdi:piggy-bank
               - entity: sensor.sunsynk_optimizer_daily_saving_vs_peak
-                name: vs peak Agile
+                name: Saving vs peak Agile
                 icon: mdi:chart-line
               - entity: sensor.sunsynk_optimizer_daily_pv_saving
                 name: Solar saving
@@ -187,10 +187,45 @@ views:
               - entity: sensor.sunsynk_optimizer_daily_export_income
                 name: Export income
                 icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_daily_actual_grid_cost
+                name: Actual grid cost
+                icon: mdi:transmission-tower
               - entity: sensor.sunsynk_optimizer_daily_co2_saved
                 name: CO₂ saved
                 icon: mdi:leaf
               - entity: sensor.sunsynk_optimizer_daily_self_sufficiency
+                name: Self-sufficiency
+                icon: mdi:home-battery
+
+          - type: entities
+            title: This week
+            entities:
+              - entity: sensor.sunsynk_optimizer_weekly_saving_vs_standard
+                name: Saving vs standard
+                icon: mdi:piggy-bank
+              - entity: sensor.sunsynk_optimizer_weekly_export_income
+                name: Export income
+                icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_weekly_co2_saved
+                name: CO₂ saved
+                icon: mdi:leaf
+              - entity: sensor.sunsynk_optimizer_weekly_self_sufficiency
+                name: Self-sufficiency
+                icon: mdi:home-battery
+
+          - type: entities
+            title: This month
+            entities:
+              - entity: sensor.sunsynk_optimizer_monthly_saving_vs_standard
+                name: Saving vs standard
+                icon: mdi:piggy-bank
+              - entity: sensor.sunsynk_optimizer_monthly_export_income
+                name: Export income
+                icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_monthly_co2_saved
+                name: CO₂ saved
+                icon: mdi:leaf
+              - entity: sensor.sunsynk_optimizer_monthly_self_sufficiency
                 name: Self-sufficiency
                 icon: mdi:home-battery
 
@@ -261,6 +296,8 @@ views:
                 name: Solar saving
               - entity: sensor.sunsynk_optimizer_daily_export_income
                 name: Export income
+              - entity: sensor.sunsynk_optimizer_daily_actual_grid_cost
+                name: Grid cost
 
           - type: history-graph
             title: CO₂ & self-sufficiency — past 7 days
