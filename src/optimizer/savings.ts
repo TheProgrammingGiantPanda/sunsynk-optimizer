@@ -18,6 +18,9 @@ export interface SavingsHistory {
   weeklyConsumptionWh: number;
   monthlyGridImportWh: number;
   monthlyConsumptionWh: number;
+  // Actual grid import cost accumulated from completed days this week/month
+  weeklyGridCostPence: number;
+  monthlyGridCostPence: number;
 }
 
 /**
@@ -62,9 +65,11 @@ export function loadSavingsHistory(now = new Date()): SavingsHistory {
       weeklyConsumptionWh:           saved.week  === week  ? (saved.weeklyConsumptionWh ?? 0)    : 0,
       monthlyGridImportWh:           saved.month === month ? (saved.monthlyGridImportWh  ?? 0)   : 0,
       monthlyConsumptionWh:          saved.month === month ? (saved.monthlyConsumptionWh ?? 0)   : 0,
+      weeklyGridCostPence:           saved.week  === week  ? (saved.weeklyGridCostPence  ?? 0)   : 0,
+      monthlyGridCostPence:          saved.month === month ? (saved.monthlyGridCostPence ?? 0)   : 0,
     };
   } catch {
-    return { week, month, weeklySavingVsStandardPence: 0, weeklyExportIncomePence: 0, weeklyCo2SavedGrams: 0, monthlySavingVsStandardPence: 0, monthlyExportIncomePence: 0, monthlyCo2SavedGrams: 0, weeklyGridImportWh: 0, weeklyConsumptionWh: 0, monthlyGridImportWh: 0, monthlyConsumptionWh: 0 };
+    return { week, month, weeklySavingVsStandardPence: 0, weeklyExportIncomePence: 0, weeklyCo2SavedGrams: 0, monthlySavingVsStandardPence: 0, monthlyExportIncomePence: 0, monthlyCo2SavedGrams: 0, weeklyGridImportWh: 0, weeklyConsumptionWh: 0, monthlyGridImportWh: 0, monthlyConsumptionWh: 0, weeklyGridCostPence: 0, monthlyGridCostPence: 0 };
   }
 }
 
@@ -86,11 +91,39 @@ export function updateSavingsHistory(
     monthlySavingVsStandardPence:  (history.month === month ? history.monthlySavingVsStandardPence  : 0) + savingVsStandardPence,
     monthlyExportIncomePence:      (history.month === month ? history.monthlyExportIncomePence       : 0) + exportIncomePence,
     monthlyCo2SavedGrams:          (history.month === month ? history.monthlyCo2SavedGrams           : 0) + co2SavedGrams,
-    // Preserve self-sufficiency accumulators unchanged (updated separately at day rollover)
+    // Preserve day-rollover accumulators unchanged (updated separately at midnight)
     weeklyGridImportWh:   history.week  === week  ? (history.weeklyGridImportWh  ?? 0) : 0,
     weeklyConsumptionWh:  history.week  === week  ? (history.weeklyConsumptionWh ?? 0) : 0,
     monthlyGridImportWh:  history.month === month ? (history.monthlyGridImportWh  ?? 0) : 0,
     monthlyConsumptionWh: history.month === month ? (history.monthlyConsumptionWh ?? 0) : 0,
+    weeklyGridCostPence:  history.week  === week  ? (history.weeklyGridCostPence  ?? 0) : 0,
+    monthlyGridCostPence: history.month === month ? (history.monthlyGridCostPence ?? 0) : 0,
+  };
+  try {
+    fs.writeFileSync(SAVINGS_PATH, JSON.stringify(updated), 'utf-8');
+  } catch (err) {
+    console.warn('[optimizer] Failed to persist savings history:', err);
+  }
+  return updated;
+}
+
+/**
+ * Add a completed day's actual grid cost to the weekly/monthly accumulators.
+ * Called at day rollover before resetting the daily accumulator.
+ */
+export function updateGridCost(
+  history: SavingsHistory,
+  gridCostPence: number,
+  now = new Date()
+): SavingsHistory {
+  const week = isoWeek(now);
+  const month = isoMonth(now);
+  const updated: SavingsHistory = {
+    ...history,
+    week,
+    month,
+    weeklyGridCostPence:  (history.week  === week  ? (history.weeklyGridCostPence  ?? 0) : 0) + gridCostPence,
+    monthlyGridCostPence: (history.month === month ? (history.monthlyGridCostPence ?? 0) : 0) + gridCostPence,
   };
   try {
     fs.writeFileSync(SAVINGS_PATH, JSON.stringify(updated), 'utf-8');

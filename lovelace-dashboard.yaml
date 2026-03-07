@@ -207,6 +207,9 @@ views:
               - entity: sensor.sunsynk_optimizer_weekly_export_income
                 name: Export income
                 icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_weekly_actual_grid_cost
+                name: Grid cost
+                icon: mdi:transmission-tower
               - entity: sensor.sunsynk_optimizer_weekly_co2_saved
                 name: CO₂ saved
                 icon: mdi:leaf
@@ -223,6 +226,9 @@ views:
               - entity: sensor.sunsynk_optimizer_monthly_export_income
                 name: Export income
                 icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_monthly_actual_grid_cost
+                name: Grid cost
+                icon: mdi:transmission-tower
               - entity: sensor.sunsynk_optimizer_monthly_co2_saved
                 name: CO₂ saved
                 icon: mdi:leaf
@@ -261,6 +267,9 @@ views:
               - entity: sensor.sunsynk_optimizer_weekly_export_income
                 name: Export income
                 icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_weekly_actual_grid_cost
+                name: Grid cost
+                icon: mdi:transmission-tower
               - entity: sensor.sunsynk_optimizer_weekly_co2_saved
                 name: CO₂ saved
                 icon: mdi:leaf
@@ -278,6 +287,9 @@ views:
               - entity: sensor.sunsynk_optimizer_monthly_export_income
                 name: Export income
                 icon: mdi:cash-plus
+              - entity: sensor.sunsynk_optimizer_monthly_actual_grid_cost
+                name: Grid cost
+                icon: mdi:transmission-tower
               - entity: sensor.sunsynk_optimizer_monthly_co2_saved
                 name: CO₂ saved
                 icon: mdi:leaf

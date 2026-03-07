@@ -12,7 +12,7 @@ import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, getDay
 import { loadAccuracyHistory, saveAccuracyHistory, recordForecast, recordActual, getAccuracyStats, suggestConfidenceFactor, AccuracyRecord } from './accuracy';
 import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
-import { loadSavingsHistory, updateSavingsHistory, updateSelfSufficiency, selfSufficiencyPct, SavingsHistory } from './savings';
+import { loadSavingsHistory, updateSavingsHistory, updateSelfSufficiency, updateGridCost, selfSufficiencyPct, SavingsHistory } from './savings';
 import { getCarbonIntensityForecast, applyCarbonWeighting, estimateCo2SavedGrams, CarbonSlot } from './carbonintensity';
 
 // ── Daily accumulator persistence ────────────────────────────────────────────
@@ -489,6 +489,7 @@ async function main() {
           console.error('[optimizer] Failed to update self-sufficiency accumulators:', err);
         }
       }
+      savingsHistory = updateGridCost(savingsHistory, accumulators.actualGridCostPence);
       accumulators = { date: today, savingVsPeakPence: 0, savingVsStandardPence: 0, pvSavingPence: 0, exportIncomePence: 0, co2SavedGrams: 0, actualGridCostPence: 0 };
       lastGridImportKwh = null; // reset on day rollover so delta is clean
       todayPvForecastWh = dailyPvWhByDate(pvForecasts, today);
@@ -581,7 +582,11 @@ async function main() {
         ['daily_saving_vs_standard', ha('sensor.sunsynk_optimizer_daily_saving_vs_standard', Math.round(accumulators.savingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Daily saving vs ${config.standardTariffPence}p standard tariff (today)` })],
         ['daily_pv_saving',          ha('sensor.sunsynk_optimizer_daily_pv_saving',          Math.round(accumulators.pvSavingPence),         { unit_of_measurement: 'p', friendly_name: 'Daily saving from solar (today)' })],
         ['daily_export_income',      ha('sensor.sunsynk_optimizer_daily_export_income',      Math.round(accumulators.exportIncomePence),     { unit_of_measurement: 'p', friendly_name: 'Daily export income (today)' })],
-        ...(config.haGridImportDailyEntity ? [['daily_actual_grid_cost', ha('sensor.sunsynk_optimizer_daily_actual_grid_cost', Math.round(accumulators.actualGridCostPence), { unit_of_measurement: 'p', friendly_name: 'Actual grid import cost today' })] as [string, Promise<unknown>]] : []),
+        ...(config.haGridImportDailyEntity ? [
+          ['daily_actual_grid_cost',   ha('sensor.sunsynk_optimizer_daily_actual_grid_cost',   Math.round(accumulators.actualGridCostPence),          { unit_of_measurement: 'p', friendly_name: 'Actual grid import cost today' })],
+          ['weekly_actual_grid_cost',  ha('sensor.sunsynk_optimizer_weekly_actual_grid_cost',  Math.round(savingsHistory.weeklyGridCostPence),         { unit_of_measurement: 'p', friendly_name: `Actual grid import cost this week (${savingsHistory.week})` })],
+          ['monthly_actual_grid_cost', ha('sensor.sunsynk_optimizer_monthly_actual_grid_cost', Math.round(savingsHistory.monthlyGridCostPence),        { unit_of_measurement: 'p', friendly_name: `Actual grid import cost this month (${savingsHistory.month})` })],
+        ] as [string, Promise<unknown>][] : []),
         ['weekly_saving_vs_standard', ha('sensor.sunsynk_optimizer_weekly_saving_vs_standard', Math.round(savingsHistory.weeklySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Weekly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.week})` })],
         ['weekly_export_income',      ha('sensor.sunsynk_optimizer_weekly_export_income',      Math.round(savingsHistory.weeklyExportIncomePence),      { unit_of_measurement: 'p', friendly_name: `Weekly export income (${savingsHistory.week})` })],
         ['monthly_saving_vs_standard', ha('sensor.sunsynk_optimizer_monthly_saving_vs_standard', Math.round(savingsHistory.monthlySavingVsStandardPence), { unit_of_measurement: 'p', friendly_name: `Monthly saving vs ${config.standardTariffPence}p standard tariff (${savingsHistory.month})` })],
