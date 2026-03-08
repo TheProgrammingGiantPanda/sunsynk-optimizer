@@ -130,8 +130,14 @@ export function calculate(
   }
 
   // ── 3. PV surplus during cheap slots (pre-charges battery for free) ───────
+  // Only count cheap slots that fall BEFORE the first expensive slot — surplus from
+  // cheap slots that come after an expensive window cannot pre-charge the battery for it.
+  const firstExpensiveStart = expensiveRates.length > 0
+    ? Math.min(...expensiveRates.map(r => new Date(r.valid_from).getTime()))
+    : Infinity;
   let pvSurplusCheapWh = 0;
   for (const rate of cheapRates) {
+    if (new Date(rate.valid_from).getTime() >= firstExpensiveStart) continue;
     const slotEnd = new Date(rate.valid_to);
     const consumption = slotConsumption(slotEnd, config.avgConsumptionWh, slotProfile, hpAdjustment);
     const pv = pvForSlot(pvForecasts, slotEnd, config.forecastConfidenceFactor);
