@@ -164,6 +164,11 @@ export function calculate(
   const batteryToFillNoPV = Math.max(0, totalExpensiveDemandNoPV - batteryWatts);
 
   // ── 6. Pick cheapest cheap slots to fill the battery ─────────────────────
+  // Split cheap slots into pre-expensive (before the first expensive slot) and post-expensive.
+  // Pre-expensive slots are the only ones that can charge the battery before the upcoming peak.
+  const preExpensiveCandidates  = cheapRates
+    .filter(r => new Date(r.valid_from).getTime() < firstExpensiveStart)
+    .sort((a, b) => a.value_inc_vat - b.value_inc_vat);
   const importCandidates = [...cheapRates].sort((a, b) => a.value_inc_vat - b.value_inc_vat);
 
   const windowRates = [...allRates].sort((a, b) => a.value_inc_vat - b.value_inc_vat);
@@ -200,6 +205,22 @@ export function calculate(
     threshold = rawValue < 0
       ? rawThreshold
       : Math.max(rawThreshold, config.minChargeFloorPence);
+  }
+
+  // Mandatory pre-expensive threshold: if we have a battery deficit to cover before the
+  // upcoming expensive window, ensure the threshold is high enough to capture the pre-expensive
+  // cheap slots we need — even if post-expensive slots are cheaper and would otherwise set
+  // a lower threshold.
+  if (batteryToFill > 0 && preExpensiveCandidates.length > 0) {
+    const mandatoryBlocks = Math.min(
+      Math.ceil(batteryToFill / (config.batteryFillRateWh * eff)),
+      preExpensiveCandidates.length
+    );
+    const mandatoryThreshold = Math.ceil(preExpensiveCandidates[mandatoryBlocks - 1].value_inc_vat);
+    if (mandatoryThreshold > threshold) {
+      threshold = mandatoryThreshold;
+      console.log(`[calculator] Raised threshold to ${threshold}p to cover pre-expensive deficit (${mandatoryBlocks} pre-peak slot(s) needed)`);
+    }
   }
 
   // ── 7. Cost savings ───────────────────────────────────────────────────────
