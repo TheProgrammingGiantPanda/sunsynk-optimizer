@@ -250,8 +250,10 @@ export function calculate(
   );
 
   // ── 8. Sell-to-grid planning ──────────────────────────────────────────────
-  // Exportable = battery charge above what expensive periods need
-  const exportableWh = Math.max(0, Math.floor(batteryWatts - totalExpensiveDemandWh));
+  // Exportable = battery charge above what expensive periods need AND above the min-SOC floor.
+  // Without the floor, the algorithm would plan exports that drain the battery below minDischargeSoc.
+  const minDischargeSocWh = config.batteryCapacityWh * ((config.minDischargeSoc ?? 20) / 100);
+  const exportableWh = Math.max(0, Math.floor(batteryWatts - totalExpensiveDemandWh - minDischargeSocWh));
   const breakEvenSell = windowRates.length > 0
     ? windowRates[0].value_inc_vat / eff
     : Infinity;

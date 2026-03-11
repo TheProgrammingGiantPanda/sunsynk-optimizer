@@ -260,9 +260,9 @@ describe('calculate — sell threshold', () => {
   });
 
   it('sellThreshold is 0 when export rate not configured', () => {
-    // battery=100% (10000), demand=3000 → exportableWh=7000; but exportRatePence=0
+    // battery=100% (10000), demand=3000, minDischargeSoc=20% (2000) → exportableWh=5000; but exportRatePence=0
     const result = calculate(BASE_CONFIG, 100, [], RATES);
-    expect(result.exportableWh).toBe(7000);
+    expect(result.exportableWh).toBe(5000);
     expect(result.sellThreshold).toBe(0);
   });
 
@@ -275,7 +275,7 @@ describe('calculate — sell threshold', () => {
   it('sellThreshold = ceil(breakEven) when surplus and export > break-even', () => {
     // eff=1.0, cheapest=10p → breakEven=10p; exportRate=12p > 10 → sellThreshold=10
     const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 12);
-    expect(result.exportableWh).toBe(7000);
+    expect(result.exportableWh).toBe(5000);
     expect(result.sellThreshold).toBe(10);
   });
 
@@ -286,10 +286,10 @@ describe('calculate — sell threshold', () => {
     expect(result.sellThreshold).toBe(13);
   });
 
-  it('exportableWh = batteryWatts − totalExpensiveDemandWh when battery is above demand', () => {
-    // battery=100% (10000), demand=3000 → exportable=7000
+  it('exportableWh = batteryWatts − totalExpensiveDemandWh − minDischargeSocWh when battery is above demand', () => {
+    // battery=100% (10000), demand=3000, minDischargeSoc=20% (2000) → exportable=5000
     const result = calculate(BASE_CONFIG, 100, [], RATES);
-    expect(result.exportableWh).toBe(7000);
+    expect(result.exportableWh).toBe(5000);
     expect(result.totalExpensiveDemandWh).toBe(3000);
   });
 
@@ -302,25 +302,25 @@ describe('calculate — sell threshold', () => {
   });
 
   it('sellThreshold targets the Nth most profitable export slot (not just break-even)', () => {
-    // battery=100%, exportable=7000 Wh → 3 slots to export (ceil(7000/2500)=3)
+    // battery=100%, exportable=5000 Wh → 2 slots to export (ceil(5000/2500)=2)
     // Export rates above break-even (10p): [30p, 25p, 20p, 15p, 12p] sorted desc
-    // Top 3 are 30p, 25p, 20p → threshold = ceil(20) = 20
+    // Top 2 are 30p, 25p → threshold = ceil(25) = 25
     const exportRates = [
       priceSlot(1, 12), priceSlot(2, 25), priceSlot(3, 30), priceSlot(4, 20), priceSlot(5, 15),
     ];
     const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
-    expect(result.exportSlotCount).toBe(3);
-    expect(result.sellThreshold).toBe(20); // lowest of the 3 planned slots (20p)
+    expect(result.exportSlotCount).toBe(2);
+    expect(result.sellThreshold).toBe(25); // lowest of the 2 planned slots (25p)
   });
 
   it('exportIncomePence = sum of planned slot prices × fillRate/1000', () => {
-    // 3 slots planned: 30p, 25p, 20p each × (2500/1000) = 2.5 kWh
-    // income = (30 + 25 + 20) × 2.5 = 187.5p
+    // 2 slots planned: 30p, 25p each × (2500/1000) = 2.5 kWh
+    // income = (30 + 25) × 2.5 = 137.5p
     const exportRates = [
       priceSlot(1, 12), priceSlot(2, 25), priceSlot(3, 30), priceSlot(4, 20), priceSlot(5, 15),
     ];
     const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
-    expect(result.exportIncomePence).toBeCloseTo(187.5, 1);
+    expect(result.exportIncomePence).toBeCloseTo(137.5, 1);
   });
 
   it('excludes export slots at or below break-even', () => {
@@ -334,14 +334,14 @@ describe('calculate — sell threshold', () => {
   });
 
   it('caps export slots at exportableWh capacity', () => {
-    // exportable=7000 Wh → 3 slots needed; 5 export slots available above break-even
-    // Only the top 3 (most profitable) are selected
+    // exportable=5000 Wh → 2 slots needed; 5 export slots available above break-even
+    // Only the top 2 (most profitable) are selected
     const exportRates = [
       priceSlot(1, 50), priceSlot(2, 40), priceSlot(3, 35), priceSlot(4, 28), priceSlot(5, 22),
     ];
     const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 20, exportRates);
-    expect(result.exportSlotCount).toBe(3);     // capped at ceil(7000/2500)
-    expect(result.sellThreshold).toBe(35);      // lowest of top-3: 50,40,35
+    expect(result.exportSlotCount).toBe(2);     // capped at ceil(5000/2500)
+    expect(result.sellThreshold).toBe(40);      // lowest of top-2: 50,40
   });
 });
 
