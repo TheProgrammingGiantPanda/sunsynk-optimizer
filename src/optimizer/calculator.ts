@@ -205,11 +205,11 @@ export function calculate(
     const idx = Math.min(blocksToUse - 1, importCandidates.length - 1);
     const rawValue = importCandidates[idx].value_inc_vat;
     const rawThreshold = Math.ceil(rawValue) || 0; // normalise -0 → 0
-    // Don't apply the positive floor when the target slot is itself negative — that would
-    // widen the threshold to include cheap positive slots we deliberately excluded.
-    threshold = rawValue < 0
-      ? rawThreshold
-      : Math.max(rawThreshold, config.minChargeFloorPence);
+    // Use the Nth slot price directly — the floor only applies when blocks=0 (no specific
+    // slots targeted). Applying it here would widen the threshold above the cheapest
+    // targeted slots, causing the inverter to also charge at higher-priced slots before
+    // the cheap window arrives (e.g. 8-9p evening when overnight slots are near 0p).
+    threshold = rawThreshold;
   }
 
   // Mandatory pre-expensive threshold: if we have a battery deficit to cover before the
