@@ -129,19 +129,24 @@ export function calculate(
     totalExpensiveDemandNoPV += consumption;
   }
 
-  // ── 3. PV surplus during cheap slots (pre-charges battery for free) ───────
+  // ── 3. PV surplus/drain during cheap slots before the first expensive slot ─
   // Only count cheap slots that fall BEFORE the first expensive slot — surplus from
   // cheap slots that come after an expensive window cannot pre-charge the battery for it.
+  // We also track net drain (consumption > PV) because the battery will be lower at peak
+  // start than it is now, and ignoring that drain causes batteryToFill to be underestimated.
   const firstExpensiveStart = expensiveRates.length > 0
     ? Math.min(...expensiveRates.map(r => new Date(r.valid_from).getTime()))
     : Infinity;
   let pvSurplusCheapWh = 0;
+  let netPrePeakDrainWh = 0;
   for (const rate of cheapRates) {
     if (new Date(rate.valid_from).getTime() >= firstExpensiveStart) continue;
     const slotEnd = new Date(rate.valid_to);
     const consumption = slotConsumption(slotEnd, config.avgConsumptionWh, slotProfile, hpAdjustment);
     const pv = pvForSlot(pvForecasts, slotEnd, config.forecastConfidenceFactor);
-    pvSurplusCheapWh += Math.max(0, pv - consumption);
+    const net = pv - consumption;
+    if (net > 0) pvSurplusCheapWh += net;
+    else netPrePeakDrainWh += -net;
   }
 
   // ── 4. Summary totals over the full horizon (for HA sensors / logging) ────
@@ -159,7 +164,7 @@ export function calculate(
   // Battery covers expensive demand; PV surplus during cheap slots reduces what we need to buy.
   // Round-trip efficiency applies to energy that goes grid → battery → load.
   const batteryToFill   = Math.max(0,
-    totalExpensiveDemandWh - batteryWatts - pvSurplusCheapWh * eff
+    totalExpensiveDemandWh - batteryWatts + netPrePeakDrainWh - pvSurplusCheapWh * eff
   );
   const batteryToFillNoPV = Math.max(0, totalExpensiveDemandNoPV - batteryWatts);
 
@@ -264,9 +269,15 @@ export function calculate(
     .filter(r => new Date(r.valid_to) > now && r.value_inc_vat > breakEvenSell)
     .sort((a, b) => b.value_inc_vat - a.value_inc_vat);
 
-  const exportSlotsNeeded = exportableWh > 0
-    ? Math.ceil(exportableWh / (config.batteryFillRateWh * eff))
-    : 0;
+  // Only plan export if:
+  //   1. Surplus fills at least one complete export slot (avoids micro-exports that aren't worth the
+  //      battery wear and inverter mode switching).
+  //   2. There are cheap import slots in the window beyond what's already committed to charging —
+  //      we need to be able to recharge what we export.
+  const exportSlotsNeeded =
+    exportableWh >= config.batteryFillRateWh && importCandidates.length > blocksToUse
+      ? Math.ceil(exportableWh / (config.batteryFillRateWh * eff))
+      : 0;
   const plannedExportSlots = futureExportRates.slice(0, exportSlotsNeeded);
   const exportIncomePence = plannedExportSlots.reduce(
     (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0
@@ -278,7 +289,7 @@ export function calculate(
   let sellThreshold: number;
   if (plannedExportSlots.length > 0) {
     sellThreshold = Math.ceil(plannedExportSlots[plannedExportSlots.length - 1].value_inc_vat);
-  } else if (exportableWh > 0 && exportRatePence > 0 && exportRatePence > breakEvenSell) {
+  } else if (exportSlotsNeeded > 0 && exportRatePence > 0 && exportRatePence > breakEvenSell) {
     sellThreshold = Math.ceil(breakEvenSell);
   } else {
     sellThreshold = 0;

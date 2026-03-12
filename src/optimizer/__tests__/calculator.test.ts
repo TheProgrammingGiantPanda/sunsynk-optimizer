@@ -77,10 +77,11 @@ const PV_SURPLUS_IN_CHEAP = Array.from({ length: 6 }, (_, i) => forecastSlot(i *
 describe('calculate — core behaviour', () => {
 
   it('battery covers expensive demand: fills remaining capacity with cheap slots', () => {
-    // 6 expensive slots × 500 Wh = 3000 Wh demand; battery at 50% = 5000 Wh → deficit = 0.
+    // 6 expensive slots × 500 Wh = 3000 Wh demand; battery at 50% = 5000 Wh.
+    // Pre-peak drain: 10 cheap slots × 500 Wh = 5000 Wh → batteryToFill = 3000-5000+5000 = 3000.
     // Remaining capacity = 5000 Wh → opportunistic fill: ceil(5000/2500) = 2 blocks.
     const result = calculate(BASE_CONFIG, 50, [], RATES);
-    expect(result.batteryToFill).toBe(0);         // no deficit
+    expect(result.batteryToFill).toBe(3000);      // deficit after accounting for pre-peak drain
     expect(result.totalExpensiveDemandWh).toBe(3000);
     expect(result.blocks).toBe(2);                // fill remaining 5000 Wh with 2 cheap slots
     expect(result.threshold).toBe(11);            // 2nd cheapest cheap slot (11p)
@@ -88,9 +89,9 @@ describe('calculate — core behaviour', () => {
 
   it('fills battery to capacity when deficit exists', () => {
     // battery 0%, capacity 10000 Wh → opportunistic fill: ceil(10000/2500) = 4 blocks
-    // batteryToFill (deficit) = 3000 Wh; threshold = 4th cheapest cheap slot (13p)
+    // batteryToFill = 3000 (demand) + 5000 (pre-peak drain) - 0 (battery) = 8000 Wh
     const result = calculate(BASE_CONFIG, 0, [], RATES);
-    expect(result.batteryToFill).toBe(3000);      // deficit to cover expensive demand
+    expect(result.batteryToFill).toBe(8000);      // demand + pre-peak drain
     expect(result.blocks).toBe(4);                // fill to capacity
     expect(result.threshold).toBe(13);            // 4th cheapest (10p,11p,12p,13p)
     expect(result.expensiveSlots).toBe(6);
@@ -108,21 +109,22 @@ describe('calculate — core behaviour', () => {
 
   it('PV during expensive slots reduces battery demand', () => {
     // PV_COVERS_EXPENSIVE: 1 kW × 6 slots → pvForSlot=500 Wh = exactly house 500 Wh → net draw=0
-    // Battery=0%, capacity=10000 → still fills to capacity with cheap slots
+    // Battery=0%, pre-peak drain=5000 Wh (10 cheap slots, no PV) → batteryToFill=0+5000=5000 Wh
     const result = calculate(BASE_CONFIG, 0, PV_COVERS_EXPENSIVE, RATES);
     expect(result.totalExpensiveDemandWh).toBe(0);
-    expect(result.batteryToFill).toBe(0);
-    // blocks > 0: opportunistically fills battery even though deficit = 0
+    expect(result.batteryToFill).toBe(5000);      // pre-peak drain with empty battery
+    // blocks > 0: opportunistically fills battery even though expensive demand = 0
     expect(result.blocks).toBe(4);  // ceil(10000/2500)
   });
 
   it('PV surplus during cheap slots reduces grid import needed', () => {
     // Battery=0%, demand=3000 Wh from expensive slots.
     // PV_SURPLUS_IN_CHEAP: 6 slots × 500 Wh surplus → pvSurplusCheapWh=3000 Wh
-    // batteryToFill (deficit) = max(0, 3000 - 0 - 3000) = 0
+    // Remaining 4 pre-peak cheap slots have no PV → netPrePeakDrainWh=4×500=2000 Wh
+    // batteryToFill = max(0, 3000 - 0 + 2000 - 3000) = 2000 Wh
     // opportunisticFill = max(0, 10000 - 3000) = 7000 → ceil(7000/2500) = 3 blocks
     const result = calculate(BASE_CONFIG, 0, PV_SURPLUS_IN_CHEAP, RATES);
-    expect(result.batteryToFill).toBe(0);
+    expect(result.batteryToFill).toBe(2000);
     expect(result.blocks).toBe(3);    // PV fills 3000 Wh; grid covers remaining 7000 Wh
     expect(result.threshold).toBe(12); // 3rd cheapest cheap slot (10p,11p,12p)
   });
@@ -232,9 +234,9 @@ describe('calculate — core behaviour', () => {
     // r100: opportunistic = 10000 - 3000×1.0 = 7000; blocks = ceil(7000/(2500×1.0)) = 3
     // r80:  opportunistic = 10000 - 3000×0.8 = 7600; blocks = ceil(7600/(2500×0.8)) = 4
     expect(r80.blocks).toBeGreaterThan(r100.blocks);
-    // batteryToFill (deficit-based) still reflects efficiency:
-    expect(r100.batteryToFill).toBe(0);    // pvSurplus×1.0 = 3000 covers 3000 demand
-    expect(r80.batteryToFill).toBe(600);   // pvSurplus×0.8 = 2400 < 3000 → deficit=600
+    // batteryToFill reflects both efficiency and pre-peak drain (4 slots × 500 Wh = 2000 Wh):
+    expect(r100.batteryToFill).toBe(2000); // 3000 demand + 2000 drain - 3000×1.0 surplus
+    expect(r80.batteryToFill).toBe(2600);  // 3000 demand + 2000 drain - 3000×0.8 surplus
   });
 
   it('pvSavingPence reflects cheap slots solar made unnecessary', () => {
@@ -365,10 +367,11 @@ describe('calculate — horizon behaviour', () => {
   });
 
   it('battery exactly covers expensive demand: fills remaining capacity with cheap slots', () => {
-    // demand=3000 Wh; battery=30% = 3000 Wh → batteryToFill=0, but 7000 Wh capacity remains
+    // demand=3000 Wh; battery=30% = 3000 Wh; pre-peak drain=5000 Wh
+    // batteryToFill = max(0, 3000-3000+5000) = 5000; 7000 Wh capacity remains
     // ceil(7000/2500) = 3 opportunistic blocks
     const result = calculate(BASE_CONFIG, 30, [], RATES);
-    expect(result.batteryToFill).toBe(0);
+    expect(result.batteryToFill).toBe(5000);
     expect(result.blocks).toBe(3);   // fill remaining 7000 Wh with 3 cheap slots
   });
 
