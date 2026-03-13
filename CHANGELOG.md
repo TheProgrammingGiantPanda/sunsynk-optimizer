@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.10] - 2026-03-13
+
+### Fixed
+- Import threshold no longer raised by `minChargeFloorPence` when specific cheap slots are already targeted (`blocks > 0`). Previously the floor was widening the charge window unnecessarily — e.g. near-0p overnight slots were targeted but threshold raised to 10p, causing the inverter to also import at 8–9p post-peak prices. The floor now only applies when `blocks = 0` (opportunistic baseline charging when battery is sufficient)
+
+## [1.7.9] - 2026-03-13
+
+### Fixed
+- Battery drain during cheap pre-peak slots is now accounted for when calculating `batteryToFill`. Previously only PV surplus before the expensive window was tracked; net consumption drain was ignored, causing the algorithm to think the battery would still be at its current level when peak arrived. The resulting underestimate meant the import threshold was left at the floor and the battery arrived at the evening peak depleted
+
 ## [1.7.3] - 2026-03-06
 
 ### Added
@@ -128,6 +138,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `repository.json` for Home Assistant add-on store compatibility
 - `sensor.sunsynk_optimizer_slot_profile` and `sensor.sunsynk_optimizer_hp_adjustment` HA sensors
 
+[1.7.10]: https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer/compare/v1.7.9...v1.7.10
+[1.7.9]: https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer/compare/v1.7.8...v1.7.9
 [1.7.3]: https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer/compare/v1.7.0...v1.7.1
