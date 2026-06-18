@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.0] - 2026-06-19
+
+### Added
+- EV smart charging via Go2Pro charger switch and Leaf SOC sensor. When `ha_ev_battery_soc_entity` and `ha_ev_charger_switch_entity` are configured, the optimizer reads the EV's current SOC, computes charge demand before the calculator runs (so cheap slots cover both house and EV load), then turns the charger on during cheap slots and off during expensive ones each price update cycle
+- Charges to `ev_daily_max_soc` (default 80%) normally, and to 100% every `ev_full_charge_interval_days` (default 14) for battery health
+- Publishes `sensor.sunsynk_optimizer_ev_battery_soc`, `ev_charge_rate`, and `ev_charging` to HA with SOC, target, plug status and reason attributes
+- Plugged-in state is re-read from HA immediately before the charger switch is toggled, ensuring the charger is never turned on if the EV was unplugged since the last demand calculation
+
 ## [1.7.11] - 2026-06-18
 
 ### Fixed
