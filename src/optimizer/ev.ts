@@ -189,7 +189,11 @@ export async function updateEvCharger(
   isChargeSlot: boolean,
 ): Promise<EvDecision> {
   const { haUrl, haToken } = evConfig;
-  const { evSocPct, targetSoc, pluggedIn } = evDemand;
+  const { evSocPct, targetSoc } = evDemand;
+
+  // Re-read plugged-in state fresh — evDemand was computed earlier in the cycle and the EV
+  // may have been unplugged since. Never turn the charger on without confirming it's still there.
+  const pluggedIn = await isEvPluggedIn(haUrl, haToken, evConfig.haEvPluggedInEntity);
 
   const { shouldCharge, reason } = computeEvDecision(
     evSocPct, targetSoc, pluggedIn, currentPricePence, isChargeSlot
