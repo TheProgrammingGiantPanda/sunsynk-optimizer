@@ -255,10 +255,7 @@ export function calculate(
   );
 
   // ── 8. Sell-to-grid planning ──────────────────────────────────────────────
-  // Exportable = battery charge above what expensive periods need AND above the min-SOC floor.
-  // Without the floor, the algorithm would plan exports that drain the battery below minDischargeSoc.
   const minDischargeSocWh = config.batteryCapacityWh * ((config.minDischargeSoc ?? 20) / 100);
-  const exportableWh = Math.max(0, Math.floor(batteryWatts - totalExpensiveDemandWh - minDischargeSocWh));
   const breakEvenSell = windowRates.length > 0
     ? windowRates[0].value_inc_vat / eff
     : Infinity;
@@ -269,15 +266,50 @@ export function calculate(
     .filter(r => new Date(r.valid_to) > now && r.value_inc_vat > breakEvenSell)
     .sort((a, b) => b.value_inc_vat - a.value_inc_vat);
 
-  // Only plan export if:
-  //   1. Surplus fills at least one complete export slot (avoids micro-exports that aren't worth the
-  //      battery wear and inverter mode switching).
-  //   2. There are cheap import slots in the window beyond what's already committed to charging —
-  //      we need to be able to recharge what we export.
-  const exportSlotsNeeded =
-    exportableWh >= config.batteryFillRateWh && importCandidates.length > blocksToUse
-      ? Math.ceil(exportableWh / (config.batteryFillRateWh * eff))
-      : 0;
+  // Project the battery level at the first export opportunity by accounting for cheap import slots
+  // that fall before that window. Only pre-export slots can actually charge the battery before we
+  // need to sell; post-export slots can only recharge afterward.
+  // When there are no export slots in the window, skip projection (firstExportSlotMs = -Infinity
+  // means no cheap slots qualify and projectedBatteryWh == batteryWatts).
+  const firstExportSlotMs = futureExportRates.length > 0
+    ? Math.min(...futureExportRates.map(s => new Date(s.valid_from).getTime()))
+    : -Infinity;
+  const preExportChargeWh = Math.min(
+    importCandidates.filter(r => new Date(r.valid_to).getTime() <= firstExportSlotMs).length
+      * config.batteryFillRateWh * eff,
+    Math.max(0, config.batteryCapacityWh - batteryWatts)
+  );
+  const projectedBatteryWh = Math.min(batteryWatts + preExportChargeWh, config.batteryCapacityWh);
+
+  // Exportable = projected battery charge above what expensive periods need AND above the min-SOC floor.
+  const exportableWh = Math.max(0, Math.floor(projectedBatteryWh - totalExpensiveDemandWh - minDischargeSocWh));
+
+  // Compute tentative export slot count, then verify that cheap recharge slots exist AFTER the
+  // last planned export slot ends. Without this check we could sell today with no cheap slots
+  // available to recharge from afterward, forcing an expensive grid recharge.
+  const tentativeExportCount = exportableWh >= config.batteryFillRateWh
+    ? Math.ceil(exportableWh / (config.batteryFillRateWh * eff))
+    : 0;
+
+  let exportSlotsNeeded = 0;
+  if (tentativeExportCount > 0) {
+    if (futureExportRates.length > 0) {
+      const tentativeSlots = futureExportRates.slice(0, tentativeExportCount);
+      const lastExportEndMs = Math.max(...tentativeSlots.map(s => new Date(s.valid_to).getTime()));
+      const postExportCheapCount = importCandidates.filter(
+        r => new Date(r.valid_from).getTime() >= lastExportEndMs
+      ).length;
+      if (postExportCheapCount > 0) {
+        exportSlotsNeeded = tentativeExportCount;
+      } else {
+        console.log(`[calculator] Export suppressed — no cheap recharge slots after last export window ends ${new Date(lastExportEndMs).toISOString()}`);
+      }
+    } else if (importCandidates.length > blocksToUse) {
+      // No export rate schedule — fall back to original count-only check
+      exportSlotsNeeded = tentativeExportCount;
+    }
+  }
+
   const plannedExportSlots = futureExportRates.slice(0, exportSlotsNeeded);
   const exportIncomePence = plannedExportSlots.reduce(
     (sum, s) => sum + s.value_inc_vat * (config.batteryFillRateWh / 1000), 0

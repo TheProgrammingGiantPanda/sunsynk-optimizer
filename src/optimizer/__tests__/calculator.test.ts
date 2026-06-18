@@ -345,6 +345,28 @@ describe('calculate — sell threshold', () => {
     expect(result.exportSlotCount).toBe(2);     // capped at ceil(5000/2500)
     expect(result.sellThreshold).toBe(40);      // lowest of top-2: 50,40
   });
+
+  it('projects battery using pre-export cheap slots when battery is low', () => {
+    // battery=20% (2000 Wh); cheap slots 0-4.5h charge to full before the export at 5h.
+    // A cheap recharge slot at NOW+9h exists after the export, so timing check passes.
+    // Without projection: exportable = max(0, 2000-3000-2000) = 0, no export planned.
+    // With projection: projected = 10000 Wh → exportable = 10000-3000-2000 = 5000 Wh.
+    const exportRates = [priceSlot(5, 30), priceSlot(5.5, 28)];
+    const ratesWithLateCharge = [...RATES, priceSlot(9, 5)]; // cheap slot after export enables recharge
+    const result = calculate(BASE_CONFIG, 20, [], ratesWithLateCharge, undefined, undefined, 0, 25, exportRates);
+    expect(result.exportableWh).toBe(5000);
+    expect(result.exportSlotCount).toBeGreaterThan(0);
+    expect(result.sellThreshold).toBeGreaterThan(0);
+  });
+
+  it('suppresses export when no cheap recharge slots exist after the last export window', () => {
+    // battery=100% (exportable=5000 Wh); export slot at NOW+9h (after all cheap RATES slots end at 5h).
+    // All cheap import slots (0-4.5h) end before the export — none remain to recharge afterward.
+    const exportRates = [priceSlot(9, 30)];
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 0, 25, exportRates);
+    expect(result.sellThreshold).toBe(0);
+    expect(result.exportSlotCount).toBe(0);
+  });
 });
 
 // ── Horizon extends to all available Agile data ───────────────────────────────
