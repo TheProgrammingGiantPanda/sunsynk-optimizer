@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.11] - 2026-06-18
+
+### Fixed
+- Export planning now projects the battery level at the time of the first export opportunity using cheap import slots that fall before that window. Previously, a low battery (e.g. 20%) would show zero exportable surplus even when overnight cheap slots would charge it to full before the morning export window
+- Export is suppressed when no cheap import slots exist after the last planned export slot ends, preventing the system from selling energy it would have to recharge at expensive grid rates
+
 ## [1.7.10] - 2026-03-13
 
 ### Fixed
