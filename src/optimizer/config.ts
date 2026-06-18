@@ -27,6 +27,13 @@ export interface Config {
   haOutdoorTempEntity: string;
   standardTariffPence: number;
   haEvChargerEntity: string;
+  haEvBatterySocEntity: string;       // EV battery SOC sensor (e.g. sensor.go2_andi_battery_soc)
+  haEvChargerSwitchEntity: string;    // switch to turn charger on/off (e.g. switch.go2_andi_charging)
+  haEvPluggedInEntity: string;        // binary_sensor indicating EV is plugged in (e.g. binary_sensor.go2_andi_plug_status)
+  evBatteryCapacityWh: number;        // EV battery size in Wh (e.g. 40000 for 40 kWh Leaf)
+  evChargeRateW: number;              // max charge rate in W (e.g. 7000 for 7 kW Go2Pro)
+  evDailyMaxSoc: number;              // daily max SOC % (default 80)
+  evFullChargeIntervalDays: number;   // days between 100% charges (default 14)
   exportTariffSchedule: string;       // "RATE:YYYY-MM-DD,..." fixed schedule
   octopusExportProduct: string;       // e.g. "OUTGOING-AGILE-BB-23-02-28" (optional)
   octopusExportTariff: string;        // e.g. "E-1R-OUTGOING-AGILE-BB-23-02-28-G" (optional)
@@ -76,6 +83,13 @@ function fromOptions(o: Record<string, unknown>): Config {
     haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
     standardTariffPence: Number(o['standard_tariff_pence'] ?? 24),
     haEvChargerEntity: String(o['ha_ev_charger_entity'] ?? ''),
+    haEvBatterySocEntity: String(o['ha_ev_battery_soc_entity'] ?? ''),
+    haEvChargerSwitchEntity: String(o['ha_ev_charger_switch_entity'] ?? ''),
+    haEvPluggedInEntity: String(o['ha_ev_plugged_in_entity'] ?? ''),
+    evBatteryCapacityWh: Number(o['ev_battery_capacity_wh'] ?? 0),
+    evChargeRateW: Number(o['ev_charge_rate_w'] ?? 7000),
+    evDailyMaxSoc: Number(o['ev_daily_max_soc'] ?? 80),
+    evFullChargeIntervalDays: Number(o['ev_full_charge_interval_days'] ?? 14),
     exportTariffSchedule: String(o['export_tariff_schedule'] ?? ''),
     octopusExportProduct: String(o['octopus_export_product'] ?? ''),
     octopusExportTariff: String(o['octopus_export_tariff'] ?? ''),
@@ -129,6 +143,13 @@ export function loadConfig(): Config {
     ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
     standard_tariff_pence: process.env.STANDARD_TARIFF_PENCE,
     ha_ev_charger_entity: process.env.HA_EV_CHARGER_ENTITY,
+    ha_ev_battery_soc_entity: process.env.HA_EV_BATTERY_SOC_ENTITY,
+    ha_ev_charger_switch_entity: process.env.HA_EV_CHARGER_SWITCH_ENTITY,
+    ha_ev_plugged_in_entity: process.env.HA_EV_PLUGGED_IN_ENTITY,
+    ev_battery_capacity_wh: process.env.EV_BATTERY_CAPACITY_WH,
+    ev_charge_rate_w: process.env.EV_CHARGE_RATE_W,
+    ev_daily_max_soc: process.env.EV_DAILY_MAX_SOC,
+    ev_full_charge_interval_days: process.env.EV_FULL_CHARGE_INTERVAL_DAYS,
     export_tariff_schedule: process.env.EXPORT_TARIFF_SCHEDULE,
     octopus_export_product: process.env.OCTOPUS_EXPORT_PRODUCT,
     octopus_export_tariff: process.env.OCTOPUS_EXPORT_TARIFF,

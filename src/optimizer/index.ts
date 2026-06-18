@@ -14,6 +14,7 @@ import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpMode
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 import { loadSavingsHistory, updateSavingsHistory, updateSelfSufficiency, updateGridCost, selfSufficiencyPct, SavingsHistory } from './savings';
 import { getCarbonIntensityForecast, applyCarbonWeighting, estimateCo2SavedGrams, CarbonSlot } from './carbonintensity';
+import { getEvDemand, updateEvCharger, EvDemand, EvDecision } from './ev';
 
 // ── Daily accumulator persistence ────────────────────────────────────────────
 
@@ -88,6 +89,10 @@ async function main() {
   if (config.touRates) {
     console.log(`[optimizer] TOU schedule active — Agile rates will not be fetched`);
     if (config.octopusProduct) console.log(`[optimizer] WARNING: tou_rates is set; octopus_product/tariff will be ignored`);
+  }
+  if (config.haEvBatterySocEntity && config.haEvChargerSwitchEntity) {
+    console.log(`[optimizer] EV charging: SOC from ${config.haEvBatterySocEntity}, switch via ${config.haEvChargerSwitchEntity}`);
+    console.log(`[optimizer] EV daily max SOC: ${config.evDailyMaxSoc}%, full charge every ${config.evFullChargeIntervalDays} days, charge rate: ${config.evChargeRateW} W`);
   }
   if (config.exportTariffSchedule) console.log(`[optimizer] Fixed export tariff: ${config.exportTariffSchedule}`);
   if (config.octopusExportProduct) console.log(`[optimizer] Outgoing Agile export: ${config.octopusExportProduct} / ${config.octopusExportTariff}`);
@@ -384,9 +389,28 @@ async function main() {
       }
     }
 
-    // Estimate EV load to first expensive slot (or 4h fallback) if charger is drawing power
+    // Compute EV charge demand — feeds into calculator so it plans enough cheap slots
     let evLoadWh = 0;
-    if (config.haEvChargerEntity) {
+    let evDemand: EvDemand | null = null;
+    if (config.haEvBatterySocEntity && config.haEvChargerSwitchEntity && config.evBatteryCapacityWh > 0) {
+      try {
+        evDemand = await getEvDemand({
+          haUrl: config.haUrl,
+          haToken: config.haToken,
+          haEvBatterySocEntity: config.haEvBatterySocEntity,
+          haEvChargerSwitchEntity: config.haEvChargerSwitchEntity,
+          haEvPluggedInEntity: config.haEvPluggedInEntity,
+          evBatteryCapacityWh: config.evBatteryCapacityWh,
+          evChargeRateW: config.evChargeRateW,
+          evDailyMaxSoc: config.evDailyMaxSoc,
+          evFullChargeIntervalDays: config.evFullChargeIntervalDays,
+        });
+        evLoadWh = evDemand.evDemandWh;
+      } catch (err) {
+        console.warn('[optimizer] Failed to read EV demand, assuming 0:', err);
+      }
+    } else if (config.haEvChargerEntity) {
+      // Legacy fallback: estimate from current draw if only the power sensor is configured
       try {
         const chargePowerKw = await getEntityState(config.haUrl, config.haToken, config.haEvChargerEntity);
         if (chargePowerKw > 0.1) {
@@ -546,6 +570,33 @@ async function main() {
       }
     }
 
+    // EV charger control — turn on/off based on current price and EV SOC
+    let evDecision: EvDecision | null = null;
+    if (evDemand && config.haEvBatterySocEntity && config.haEvChargerSwitchEntity) {
+      try {
+        // A "charge slot" = current price is at or below the threshold the calculator decided to buy at
+        const isChargeSlot = currentRatePence !== null && currentRatePence <= result.threshold;
+        evDecision = await updateEvCharger(
+          {
+            haUrl: config.haUrl,
+            haToken: config.haToken,
+            haEvBatterySocEntity: config.haEvBatterySocEntity,
+            haEvChargerSwitchEntity: config.haEvChargerSwitchEntity,
+            haEvPluggedInEntity: config.haEvPluggedInEntity,
+            evBatteryCapacityWh: config.evBatteryCapacityWh,
+            evChargeRateW: config.evChargeRateW,
+            evDailyMaxSoc: config.evDailyMaxSoc,
+            evFullChargeIntervalDays: config.evFullChargeIntervalDays,
+          },
+          evDemand,
+          currentRatePence,
+          isChargeSlot,
+        );
+      } catch (err) {
+        console.error('[optimizer] Failed to update EV charger:', err);
+      }
+    }
+
     // Push results to HA sensors
     {
       const ha = (id: string, state: string | number, attrs: Record<string, unknown> = {}) =>
@@ -603,7 +654,10 @@ async function main() {
           if (config.haGridImportDailyEntity && monthlySS !== null) entries.push(['monthly_self_sufficiency', ha('sensor.sunsynk_optimizer_monthly_self_sufficiency', monthlySS, { unit_of_measurement: '%', friendly_name: `Self-sufficiency this month (${savingsHistory.month})` })]);
           return entries;
         })(),
-        ...(evLoadWh > 0 ? [['ev_load',        ha('sensor.sunsynk_optimizer_ev_load',        evLoadWh,               { unit_of_measurement: 'Wh',     friendly_name: 'Estimated EV charge load to peak' })] as [string, Promise<unknown>]] : []),
+        ...(evDemand ? [['ev_load', ha('sensor.sunsynk_optimizer_ev_load', evDemand.evDemandWh, {
+          unit_of_measurement: 'Wh', friendly_name: 'EV charge demand',
+          ev_soc: evDemand.evSocPct, target_soc: evDemand.targetSoc, charge_rate_w: evDemand.chargeRateW,
+        })] as [string, Promise<unknown>]] : evLoadWh > 0 ? [['ev_load', ha('sensor.sunsynk_optimizer_ev_load', evLoadWh, { unit_of_measurement: 'Wh', friendly_name: 'Estimated EV charge load to peak' })] as [string, Promise<unknown>]] : []),
         ...(exportRatePence > 0 ? [['export_rate',   ha('sensor.sunsynk_optimizer_export_rate',   exportRatePence,        { unit_of_measurement: 'p/kWh',  friendly_name: 'Effective export rate' })] as [string, Promise<unknown>]] : []),
         ['exportable_wh',    ha('sensor.sunsynk_optimizer_exportable_wh',    result.exportableWh,    { unit_of_measurement: 'Wh',     friendly_name: 'Energy available to sell to grid' })],
         ['sell_threshold',   ha('sensor.sunsynk_optimizer_sell_threshold',   result.sellThreshold,   { unit_of_measurement: 'p/kWh',  friendly_name: 'Sell-to-grid threshold' })],

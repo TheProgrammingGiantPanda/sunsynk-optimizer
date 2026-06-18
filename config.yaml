@@ -38,6 +38,13 @@ options:
   ha_outdoor_temp_entity: "sensor.main_heat_pump_outdoor_temperature"
   standard_tariff_pence: 24
   ha_ev_charger_entity: "sensor.go2_andi_charge_power"
+  ha_ev_battery_soc_entity: ""
+  ha_ev_charger_switch_entity: ""
+  ha_ev_plugged_in_entity: ""
+  ev_battery_capacity_wh: 0
+  ev_charge_rate_w: 7000
+  ev_daily_max_soc: 80
+  ev_full_charge_interval_days: 14
   export_tariff_schedule: "15:2024-01-01"
   octopus_export_product: ""
   octopus_export_tariff: ""
@@ -79,6 +86,13 @@ schema:
   ha_outdoor_temp_entity: str
   standard_tariff_pence: float
   ha_ev_charger_entity: str
+  ha_ev_battery_soc_entity: str?
+  ha_ev_charger_switch_entity: str?
+  ha_ev_plugged_in_entity: str?
+  ev_battery_capacity_wh: int?
+  ev_charge_rate_w: int?
+  ev_daily_max_soc: int?
+  ev_full_charge_interval_days: int?
   export_tariff_schedule: str
   octopus_export_product: str
   octopus_export_tariff: str
