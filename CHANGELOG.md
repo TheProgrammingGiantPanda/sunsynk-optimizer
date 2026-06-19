@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.1] - 2026-06-19
+
+### Fixed
+- EV charge demand is now a first-class input to slot planning: the import threshold is raised to cover enough cheap slots for EV charging even when the house battery is already full. Previously a full battery meant `blocks=0` and the EV received no cheap slots
+- Full-charge interval resets whenever the EV SOC reaches 100%, regardless of whether it was a planned interval charge. Away-charging and opportunistic negative-price charges now correctly reset the counter, preventing unnecessary back-to-back 100% charges
+
 ## [1.8.0] - 2026-06-19
 
 ### Added
