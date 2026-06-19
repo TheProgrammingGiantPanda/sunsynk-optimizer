@@ -39,6 +39,13 @@ const BASE_CONFIG: Config = {
   haOutdoorTempEntity: '',
   standardTariffPence: 24,
   haEvChargerEntity: '',
+  haEvBatterySocEntity: '',
+  haEvChargerSwitchEntity: '',
+  haEvPluggedInEntity: '',
+  evBatteryCapacityWh: 0,
+  evChargeRateW: 7000,   // 7 kW → 3500 Wh per 30-min slot
+  evDailyMaxSoc: 80,
+  evFullChargeIntervalDays: 14,
   exportTariffSchedule: '',
   octopusExportProduct: '',
   octopusExportTariff: '',
@@ -197,6 +204,22 @@ describe('calculate — core behaviour', () => {
     const r1 = calculate(cfgHigh, 0, PV_COVERS_EXPENSIVE, RATES);
     expect(r1.pvTotal).toBeLessThan(r0.pvTotal);
     expect(r0.pvTotal).toBe(r0.pvTotalP50);
+  });
+
+  it('sets threshold to cover EV charge slots when battery is already full', () => {
+    // battery=100% → no battery blocks needed; EV demand=7000 Wh at 7 kW (3500 Wh/slot) → 2 EV blocks
+    // Without EV: blocks=0, threshold=minChargeFloorPence=0
+    // With EV: blocksToUse=max(0,0,2)=2, threshold=2nd cheapest slot (11p)
+    const result = calculate(BASE_CONFIG, 100, [], RATES, undefined, undefined, 7000);
+    expect(result.blocks).toBe(2);
+    expect(result.threshold).toBe(11);
+  });
+
+  it('battery blocks win when they exceed EV blocks', () => {
+    // battery=0% → 4 battery blocks; EV demand=3500 Wh → 1 EV block → battery wins
+    const result = calculate(BASE_CONFIG, 0, [], RATES, undefined, undefined, 3500);
+    expect(result.blocks).toBe(4);
+    expect(result.threshold).toBe(13); // unchanged vs no EV
   });
 
   it('adds evLoadWh to houseUsage', () => {

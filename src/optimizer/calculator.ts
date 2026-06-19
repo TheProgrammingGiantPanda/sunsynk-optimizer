@@ -196,7 +196,13 @@ export function calculate(
   const negativeBlocksToCharge = maxAbsorbBlocks > 0
     ? Math.min(negativeSlots.length, maxAbsorbBlocks)
     : negativeSlots.length;
-  const blocksToUse = Math.max(blocks, negativeBlocksToCharge);
+
+  // EV draws directly from the grid during cheap slots, independent of the house battery.
+  // Ensure the threshold covers enough cheap slots for EV charging even when the battery is full.
+  const evSlotWh = (config.evChargeRateW ?? 0) / 2; // Wh per 30-min slot at EV charge rate
+  const evBlocks = evLoadWh > 0 && evSlotWh > 0 ? Math.ceil(evLoadWh / evSlotWh) : 0;
+
+  const blocksToUse = Math.max(blocks, negativeBlocksToCharge, evBlocks);
 
   let threshold: number;
   if (blocksToUse < 1 || !importCandidates.length) {

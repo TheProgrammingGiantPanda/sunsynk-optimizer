@@ -199,17 +199,15 @@ export async function updateEvCharger(
     evSocPct, targetSoc, pluggedIn, currentPricePence, isChargeSlot
   );
 
-  // Track when we reach 100% for the full-charge interval
   const evState = loadEvState();
-  const { isDueFullCharge } = computeTargetSoc(
-    evState.lastFullChargeDate,
-    evConfig.evFullChargeIntervalDays,
-    evConfig.evDailyMaxSoc
-  );
-  if (evSocPct >= 100 && isDueFullCharge) {
-    evState.lastFullChargeDate = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Record a full charge whenever SOC reaches 100%, regardless of whether it was a planned
+  // interval charge — covers away-charging and opportunistic negative-price charges too.
+  if (evSocPct >= 100 && evState.lastFullChargeDate !== today) {
+    evState.lastFullChargeDate = today;
     saveEvState(evState);
-    console.log(`[ev] Full charge completed — next full charge due in ${evConfig.evFullChargeIntervalDays} days`);
+    console.log(`[ev] Full charge reached — next full charge due in ${evConfig.evFullChargeIntervalDays} days`);
   }
 
   // Control the charger switch
