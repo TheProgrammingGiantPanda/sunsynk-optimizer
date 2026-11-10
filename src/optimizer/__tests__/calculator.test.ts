@@ -151,7 +151,8 @@ describe('calculate — core behaviour', () => {
 
   it('all-expensive rates: threshold falls to floor when no cheap slots available', () => {
     const allExpensive = Array.from({ length: 8 }, (_, i) => priceSlot(i * 0.5, 20 + i));
-    const result = calculate(BASE_CONFIG, 0, [], allExpensive);
+    // Pre-peak arbitrage disabled here: it would (correctly) buy the 20p slot ahead of the 27p one.
+    const result = calculate({ ...BASE_CONFIG, preChargeMinSavingPence: -1 }, 0, [], allExpensive);
     expect(result.expensiveSlots).toBe(8);
     expect(result.threshold).toBe(BASE_CONFIG.minChargeFloorPence);
     expect(result.blocks).toBe(0); // no cheap slots to buy
@@ -506,5 +507,44 @@ describe('calculate — negative price slot handling', () => {
     const rates = [priceSlot(0, -0.3), ...RATES.slice(1)];
     const result = calculate(config, 100, [], rates);
     expect(result.threshold).toBe(0); // ceil(-0.3)=0, not 10
+  });
+});
+
+describe('calculate — pre-peak arbitrage', () => {
+  // 4 slots at 58p (now → +2h) then 4 peak slots at 76p. expensiveThreshold 20p ⇒ all "expensive".
+  // No cheap slots before the peak; one cheap 30p slot after (for the opportunistic path).
+  const mk = () => [
+    ...Array.from({ length: 4 }, (_, i) => priceSlot(i * 0.5, 58)),
+    ...Array.from({ length: 4 }, (_, i) => priceSlot(2 + i * 0.5, 76)),
+  ];
+  const cfg = { ...BASE_CONFIG, expensiveThresholdPence: 40, batteryRoundTripEfficiency: 0.9 };
+
+  it('buys pre-peak from cheaper expensive slots when saving beats the margin', () => {
+    // 58/0.9 = 64.4p vs 76p → 11.6p saving ≥ 5p. Battery 20% = at the floor → usable 0.
+    const result = calculate(cfg, 20, [], mk());
+    expect(result.preChargeSlots).toBeGreaterThan(0);
+    expect(result.threshold).toBe(58);
+  });
+
+  it('does nothing when the saving is below the margin', () => {
+    const result = calculate({ ...cfg, preChargeMinSavingPence: 15 }, 20, [], mk());
+    expect(result.preChargeSlots).toBe(0);
+    expect(result.threshold).not.toBe(58);
+  });
+
+  it('can be disabled with a negative margin', () => {
+    const result = calculate({ ...cfg, preChargeMinSavingPence: -1 }, 20, [], mk());
+    expect(result.preChargeSlots).toBe(0);
+  });
+
+  it('never buys in the peak slots themselves (nothing dearer comes later)', () => {
+    const flat = Array.from({ length: 8 }, (_, i) => priceSlot(i * 0.5, 76));
+    const result = calculate(cfg, 20, [], flat);
+    expect(result.preChargeSlots).toBe(0);
+  });
+
+  it('buys nothing when the battery already covers the expensive demand', () => {
+    const result = calculate(cfg, 100, [], mk());
+    expect(result.preChargeSlots).toBe(0);
   });
 });
