@@ -1,5 +1,5 @@
 name: "Sunsynk Optimizer"
-version: "1.8.2"
+version: "1.9.0"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
 url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
@@ -35,6 +35,7 @@ options:
   forecast_confidence_factor: 0.3
   forecast_fetch_times: "06:00,12:00"
   ha_heat_pump_entity: "sensor.main_heat_pump_total_electricity_consumption_kwh"
+  ha_ac_entity: ""
   ha_outdoor_temp_entity: "sensor.main_heat_pump_outdoor_temperature"
   standard_tariff_pence: 24
   ha_ev_charger_entity: "sensor.go2_andi_charge_power"
@@ -83,6 +84,7 @@ schema:
   forecast_confidence_factor: float
   forecast_fetch_times: str
   ha_heat_pump_entity: str
+  ha_ac_entity: str?
   ha_outdoor_temp_entity: str
   standard_tariff_pence: float
   ha_ev_charger_entity: str

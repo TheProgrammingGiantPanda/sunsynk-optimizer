@@ -10,7 +10,7 @@ import { calculate } from './calculator';
 import { scheduleDailyTimes, scheduleAgileAligned } from './scheduler';
 import { getEntityState, setState, getSlotProfileWh, getAvgConsumptionWh, getDayMaxKwh, createNotification, dismissNotification, NOTIFICATION_ID_NEGATIVE_PRICES } from './homeassistant';
 import { loadAccuracyHistory, saveAccuracyHistory, recordForecast, recordActual, getAccuracyStats, suggestConfidenceFactor, AccuracyRecord } from './accuracy';
-import { buildHeatPumpModel, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
+import { buildHeatPumpModel, buildAcModel, thermalSlotAdjustment, heatPumpSlotAdjustment, getHaLocation, HeatPumpModel } from './heatpump';
 import { getHourlyForecast, avgForecastTemp } from './openmeteo';
 import { loadSavingsHistory, updateSavingsHistory, updateSelfSufficiency, updateGridCost, selfSufficiencyPct, SavingsHistory } from './savings';
 import { getCarbonIntensityForecast, applyCarbonWeighting, estimateCo2SavedGrams, CarbonSlot } from './carbonintensity';
@@ -96,6 +96,8 @@ async function main() {
     console.log(`[optimizer] EV charging: SOC from ${config.haEvBatterySocEntity}, switch via ${config.haEvChargerSwitchEntity}`);
     console.log(`[optimizer] EV daily max SOC: ${config.evDailyMaxSoc}%, full charge every ${config.evFullChargeIntervalDays} days, charge rate: ${config.evChargeRateW} W`);
   }
+  if (config.haHeatPumpEntity) console.log(`[optimizer] Heat pump model: ${config.haHeatPumpEntity}`);
+  if (config.haAcEntity) console.log(`[optimizer] AC model: ${config.haAcEntity}`);
   if (config.exportTariffSchedule) console.log(`[optimizer] Fixed export tariff: ${config.exportTariffSchedule}`);
   if (config.octopusExportProduct) console.log(`[optimizer] Outgoing Agile export: ${config.octopusExportProduct} / ${config.octopusExportTariff}`);
   console.log(`[optimizer] Price updates: aligned to Agile half-hour boundaries (+2 min offset)`);
@@ -126,6 +128,8 @@ async function main() {
   let computedAvgConsumptionWh: number | null = null;
   let hpSlotProfile: number[] | undefined;
   let hpModel: HeatPumpModel | null = null;
+  let acSlotProfile: number[] | undefined;
+  let acModel: HeatPumpModel | null = null;
 
   // Last values sent to Sunsynk — skip API call when unchanged
   let lastThreshold: number | null = null;
@@ -205,6 +209,19 @@ async function main() {
         hpModel = model;
       } catch (err) {
         console.error('[optimizer] Failed to build heat pump model:', err);
+      }
+    }
+
+    if (config.haAcEntity) {
+      try {
+        const [acProfile, model] = await Promise.all([
+          getSlotProfileWh(config.haUrl, config.haToken, config.haAcEntity, config.consumptionAverageDays, 'air conditioner'),
+          buildAcModel(config.haUrl, config.haToken, config.haAcEntity, config.haOutdoorTempEntity, config.consumptionAverageDays),
+        ]);
+        if (acProfile) acSlotProfile = acProfile;
+        acModel = model;
+      } catch (err) {
+        console.error('[optimizer] Failed to build AC model:', err);
       }
     }
 
@@ -367,29 +384,41 @@ async function main() {
       exportRates = rates.map(r => ({ ...r, value_exc_vat: exportRatePence / 1.05, value_inc_vat: exportRatePence }));
     }
 
-    // Compute heat pump adjustment based on weather forecast temperature
-    // Horizon = end of available Agile data (naturally bounded by Octopus API)
+    // Compute per-slot thermal load adjustments (HP and AC) from weather forecast temperature.
+    // Horizon = end of available Agile data (naturally bounded by Octopus API).
+    // The weather forecast is fetched once and shared between both models.
     let hpAdjustment: number[] | undefined;
-    if (hpModel && hpSlotProfile) {
+    let acAdjustment: number[] | undefined;
+    if ((hpModel && hpSlotProfile) || (acModel && acSlotProfile)) {
       try {
-        const now = new Date();
+        const thermalNow = new Date();
         const horizonTime = rates.length > 0
           ? new Date(rates.reduce((latest, r) =>
               new Date(r.valid_to) > new Date(latest.valid_to) ? r : latest
             ).valid_to)
-          : new Date(now.getTime() + 24 * 3600000);
+          : new Date(thermalNow.getTime() + 24 * 3600000);
 
         const { lat, lon } = await getHaLocation(config.haUrl, config.haToken);
         const forecast = await getHourlyForecast(lat, lon);
-        const forecastAvgTemp = avgForecastTemp(forecast, now, horizonTime);
+        const forecastAvgTemp = avgForecastTemp(forecast, thermalNow, horizonTime);
 
         if (!isNaN(forecastAvgTemp)) {
-          hpAdjustment = heatPumpSlotAdjustment(hpModel, forecastAvgTemp, hpSlotProfile);
+          if (hpModel && hpSlotProfile) {
+            hpAdjustment = thermalSlotAdjustment(hpModel, forecastAvgTemp, hpSlotProfile, 'heatpump');
+          }
+          if (acModel && acSlotProfile) {
+            acAdjustment = thermalSlotAdjustment(acModel, forecastAvgTemp, acSlotProfile, 'ac');
+          }
         }
       } catch (err) {
-        console.error('[optimizer] Failed to compute HP forecast adjustment:', err);
+        console.error('[optimizer] Failed to compute thermal forecast adjustment:', err);
       }
     }
+
+    // Combine HP and AC adjustments into a single per-slot thermal delta for the calculator
+    const thermalAdjustment: number[] | undefined = hpAdjustment || acAdjustment
+      ? Array.from({ length: 48 }, (_, i) => (hpAdjustment?.[i] ?? 0) + (acAdjustment?.[i] ?? 0))
+      : undefined;
 
     // Compute EV charge demand — feeds into calculator so it plans enough cheap slots
     let evLoadWh = 0;
@@ -488,7 +517,7 @@ async function main() {
     // Use auto-tuned confidence factor if available, otherwise static config
     const effectiveConfidenceFactor = computedConfidenceFactor ?? config.forecastConfidenceFactor;
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, minDischargeSoc: effectiveMinSoc, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, minDischargeSoc: effectiveMinSoc, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, thermalAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);
@@ -667,7 +696,11 @@ async function main() {
         ['export_income',    ha('sensor.sunsynk_optimizer_export_income',    result.exportIncomePence, { unit_of_measurement: 'p',      friendly_name: 'Expected export income' })],
         ...(hpAdjustment ? [['hp_adjustment', ha('sensor.sunsynk_optimizer_hp_adjustment',
           hpAdjustment.reduce((a, b) => a + b, 0),
-          { unit_of_measurement: 'Wh', friendly_name: 'Heat pump adjustment vs historical', slots: hpAdjustment }
+          { unit_of_measurement: 'Wh', friendly_name: 'Heat pump load adjustment vs historical', slots: hpAdjustment }
+        )] as [string, Promise<unknown>]] : []),
+        ...(acAdjustment ? [['ac_adjustment', ha('sensor.sunsynk_optimizer_ac_adjustment',
+          acAdjustment.reduce((a, b) => a + b, 0),
+          { unit_of_measurement: 'Wh', friendly_name: 'Air conditioner load adjustment vs historical', slots: acAdjustment }
         )] as [string, Promise<unknown>]] : []),
         ...(slotProfile ? [['slot_profile', ha('sensor.sunsynk_optimizer_slot_profile',
           slotProfile.reduce((a, b) => a + b, 0),

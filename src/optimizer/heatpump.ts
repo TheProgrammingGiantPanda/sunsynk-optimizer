@@ -17,44 +17,45 @@ export interface HeatPumpModel {
 }
 
 /**
- * Builds a linear regression model: HP_daily_kWh = intercept + slope × avg_outdoor_temp_°C
+ * Shared OLS regression: load_daily_kWh = intercept + slope × avg_outdoor_temp_°C
  *
- * Uses history of the HP energy sensor (lifetime cumulative kWh, differentiated per day)
- * and the outdoor temperature sensor (averaged per day).
+ * Differentiates a lifetime-cumulative energy sensor to get daily kWh, then pairs
+ * with daily average outdoor temperature to build a linear model.
  *
- * Returns null if insufficient history (< 3 days with both sensors).
+ * Returns null if insufficient history (< 3 complete days with both sensors).
  */
-export async function buildHeatPumpModel(
+async function buildThermalLoadModel(
   haUrl: string,
   haToken: string,
-  hpEnergyEntity: string,
+  energyEntity: string,
   outdoorTempEntity: string,
-  days = 10
+  days: number,
+  label: string
 ): Promise<HeatPumpModel | null> {
   const client = haClient(haUrl, haToken);
   const start = new Date();
   start.setDate(start.getDate() - (days + 1));
   const endTime = new Date().toISOString();
 
-  const [hpRes, tempRes] = await Promise.all([
+  const [energyRes, tempRes] = await Promise.all([
     client.get(`/history/period/${start.toISOString()}`, {
-      params: { filter_entity_id: hpEnergyEntity, end_time: endTime },
+      params: { filter_entity_id: energyEntity, end_time: endTime },
     }),
     client.get(`/history/period/${start.toISOString()}`, {
       params: { filter_entity_id: outdoorTempEntity, end_time: endTime },
     }),
   ]);
 
-  const hpStates: any[] = hpRes.data?.[0] ?? [];
+  const energyStates: any[] = energyRes.data?.[0] ?? [];
   const tempStates: any[] = tempRes.data?.[0] ?? [];
 
-  // HP energy: differentiate to get daily kWh (sensor is lifetime cumulative, never resets)
-  const hpByDay = new Map<string, number>();
-  for (let i = 1; i < hpStates.length; i++) {
-    const delta = parseFloat(hpStates[i].state) - parseFloat(hpStates[i - 1].state);
+  // Energy sensor: differentiate cumulative kWh to get daily delta
+  const energyByDay = new Map<string, number>();
+  for (let i = 1; i < energyStates.length; i++) {
+    const delta = parseFloat(energyStates[i].state) - parseFloat(energyStates[i - 1].state);
     if (isNaN(delta) || delta < 0) continue;
-    const day = (hpStates[i].last_updated as string).slice(0, 10);
-    hpByDay.set(day, (hpByDay.get(day) ?? 0) + delta);
+    const day = (energyStates[i].last_updated as string).slice(0, 10);
+    energyByDay.set(day, (energyByDay.get(day) ?? 0) + delta);
   }
 
   // Outdoor temp: average per day
@@ -67,16 +68,16 @@ export async function buildHeatPumpModel(
     tempByDay.get(day)!.push(val);
   }
 
-  // Build paired (x=avgTemp, y=hpKwh) dataset — exclude today
+  // Build paired (x=avgTemp, y=dailyKwh) dataset — exclude today (incomplete)
   const today = new Date().toISOString().slice(0, 10);
   const pairs: { x: number; y: number }[] = [];
 
-  for (const [day, hpKwh] of hpByDay) {
+  for (const [day, dailyKwh] of energyByDay) {
     if (day === today) continue;
     const temps = tempByDay.get(day);
     if (!temps?.length) continue;
     const avgTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
-    pairs.push({ x: avgTemp, y: hpKwh });
+    pairs.push({ x: avgTemp, y: dailyKwh });
   }
 
   if (pairs.length < 3) return null;
@@ -95,43 +96,74 @@ export async function buildHeatPumpModel(
   const historicalAvgTemp = sumX / n;
 
   console.log(
-    `[heatpump] Model from ${pairs.length} days: HP = ${intercept.toFixed(2)} + ${slope.toFixed(3)} × temp°C ` +
+    `[${label}] Model from ${pairs.length} days: load = ${intercept.toFixed(2)} + ${slope.toFixed(3)} × temp°C ` +
     `(avg ${historicalAvgTemp.toFixed(1)}°C → ${historicalDailyKwh.toFixed(1)} kWh/day)`
   );
 
   return { slope, intercept, historicalDailyKwh, historicalAvgTemp, days: pairs.length };
 }
 
+export async function buildHeatPumpModel(
+  haUrl: string,
+  haToken: string,
+  hpEnergyEntity: string,
+  outdoorTempEntity: string,
+  days = 10
+): Promise<HeatPumpModel | null> {
+  return buildThermalLoadModel(haUrl, haToken, hpEnergyEntity, outdoorTempEntity, days, 'heatpump');
+}
+
+export async function buildAcModel(
+  haUrl: string,
+  haToken: string,
+  acEnergyEntity: string,
+  outdoorTempEntity: string,
+  days = 10
+): Promise<HeatPumpModel | null> {
+  return buildThermalLoadModel(haUrl, haToken, acEnergyEntity, outdoorTempEntity, days, 'ac');
+}
+
 /**
- * Given a heat pump model and a forecast average temperature, compute the per-slot
- * HP energy adjustment (Wh) relative to the historical average embedded in the house
+ * Given a thermal load model and a forecast average temperature, compute the per-slot
+ * energy adjustment (Wh) relative to the historical average embedded in the house
  * load profile.
  *
- * house_load_daily_profile already includes HP at historical-average conditions.
- * This returns the delta to add/subtract per slot based on temperature deviation.
+ * house_load_daily_profile already includes the load at historical-average conditions.
+ * Returns a 48-element delta array (positive = more load than historical average).
  *
- * Returns a 48-element array of Wh adjustments (positive = more HP than historical).
+ * For HP: negative slope → cold forecast → positive delta (more heating needed).
+ * For AC: positive slope → hot forecast → positive delta (more cooling needed).
  */
-export function heatPumpSlotAdjustment(
+export function thermalSlotAdjustment(
   model: HeatPumpModel,
   forecastAvgTemp: number,
-  hpSlotProfile: number[]   // historical HP Wh per slot
+  loadSlotProfile: number[],
+  label: string
 ): number[] {
   const predictedDailyKwh = model.intercept + model.slope * forecastAvgTemp;
 
-  // Clamp: HP can't consume negative energy
+  // Clamp: load can't be negative
   const clampedPredicted = Math.max(0, predictedDailyKwh);
   const ratio = model.historicalDailyKwh > 0
     ? clampedPredicted / model.historicalDailyKwh
     : 1;
 
   console.log(
-    `[heatpump] Forecast avg ${forecastAvgTemp.toFixed(1)}°C → predicted ${clampedPredicted.toFixed(1)} kWh/day ` +
+    `[${label}] Forecast avg ${forecastAvgTemp.toFixed(1)}°C → predicted ${clampedPredicted.toFixed(1)} kWh/day ` +
     `(historical ${model.historicalDailyKwh.toFixed(1)} kWh/day, ratio ${ratio.toFixed(2)})`
   );
 
-  // Adjustment per slot = hp_profile[i] × (ratio - 1)
-  return hpSlotProfile.map(wh => Math.round(wh * (ratio - 1)));
+  // Adjustment per slot = profile[i] × (ratio - 1)
+  return loadSlotProfile.map(wh => Math.round(wh * (ratio - 1)));
+}
+
+/** @deprecated Use thermalSlotAdjustment with label='heatpump' */
+export function heatPumpSlotAdjustment(
+  model: HeatPumpModel,
+  forecastAvgTemp: number,
+  hpSlotProfile: number[]
+): number[] {
+  return thermalSlotAdjustment(model, forecastAvgTemp, hpSlotProfile, 'heatpump');
 }
 
 /**
