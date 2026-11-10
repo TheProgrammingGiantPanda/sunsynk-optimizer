@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.0] - 2026-11-10
+
+### Added
+- Weather-aware AC load planning — configure `ha_ac_entity` with a cumulative kWh energy sensor for your air conditioner. The optimizer builds a linear regression model (AC daily energy vs outdoor temperature) and projects tomorrow's AC load slot-by-slot, increasing the import demand estimate on hot days so the battery and cheap import slots are sized accordingly
+- Both heat pump (cold weather) and AC (hot weather) adjustments are now combined into a single thermal slot adjustment before feeding the calculator, and each is published as its own HA sensor (`sensor.sunsynk_optimizer_hp_adjustment` and `sensor.sunsynk_optimizer_ac_adjustment`) so you can track both contributions
+- Weather forecast is fetched once per price-update cycle and shared between both models (no extra API calls)
+
 ## [1.8.2] - 2026-11-10
 
 ### Fixed

@@ -24,6 +24,7 @@ export interface Config {
   forecastConfidenceFactor: number;
   forecastFetchTimes: string[];
   haHeatPumpEntity: string;
+  haAcEntity: string;            // optional — air conditioner energy sensor (kWh cumulative) for hot-weather load model
   haOutdoorTempEntity: string;
   standardTariffPence: number;
   haEvChargerEntity: string;
@@ -80,6 +81,7 @@ function fromOptions(o: Record<string, unknown>): Config {
       .split(',')
       .map(t => t.trim()),
     haHeatPumpEntity: String(o['ha_heat_pump_entity'] ?? ''),
+    haAcEntity: String(o['ha_ac_entity'] ?? ''),
     haOutdoorTempEntity: String(o['ha_outdoor_temp_entity'] ?? 'sensor.main_heat_pump_outdoor_temperature'),
     standardTariffPence: Number(o['standard_tariff_pence'] ?? 24),
     haEvChargerEntity: String(o['ha_ev_charger_entity'] ?? ''),
@@ -140,6 +142,7 @@ export function loadConfig(): Config {
     forecast_confidence_factor: process.env.FORECAST_CONFIDENCE_FACTOR,
     forecast_fetch_times: process.env.FORECAST_FETCH_TIMES,
     ha_heat_pump_entity: process.env.HA_HEAT_PUMP_ENTITY,
+    ha_ac_entity: process.env.HA_AC_ENTITY,
     ha_outdoor_temp_entity: process.env.HA_OUTDOOR_TEMP_ENTITY,
     standard_tariff_pence: process.env.STANDARD_TARIFF_PENCE,
     ha_ev_charger_entity: process.env.HA_EV_CHARGER_ENTITY,
