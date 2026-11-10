@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.0] - 2026-11-10
+
+### Added
+- Pre-peak arbitrage: when too few cheap slots exist before an expensive period (e.g. every slot until the evening peak is 58p+), the optimizer now buys from the cheapest earlier "expensive" slots if their price after round-trip losses is at least `pre_charge_min_saving_pence` (default 5p) below the later peak slot it displaces, so the battery covers as much of the peak as possible instead of running flat. Set the option negative to disable
+
 ## [1.8.3] - 2026-11-10
 
 ### Fixed

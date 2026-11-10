@@ -37,6 +37,7 @@ export interface Config {
   exportTariffSchedule: string;       // "RATE:YYYY-MM-DD,..." fixed schedule
   octopusExportProduct: string;       // e.g. "OUTGOING-AGILE-BB-23-02-28" (optional)
   octopusExportTariff: string;        // e.g. "E-1R-OUTGOING-AGILE-BB-23-02-28-G" (optional)
+  preChargeMinSavingPence: number;    // min p/kWh saving (after round-trip loss) needed to buy pre-peak from an 'expensive' slot; negative disables
   batteryRoundTripEfficiency: number; // 0–1; fraction of imported Wh recoverable on discharge (default 0.9)
   minDischargeSoc: number;            // % — minimum battery SoC before selling stops (limitSoc on direction=0)
   sunsynkPlantId: string;             // optional — target a specific plant ID; falls back to plants[0]
@@ -93,6 +94,7 @@ function fromOptions(o: Record<string, unknown>): Config {
     exportTariffSchedule: String(o['export_tariff_schedule'] ?? ''),
     octopusExportProduct: String(o['octopus_export_product'] ?? ''),
     octopusExportTariff: String(o['octopus_export_tariff'] ?? ''),
+    preChargeMinSavingPence: Number(o['pre_charge_min_saving_pence'] ?? 5),
     batteryRoundTripEfficiency: Number(o['battery_round_trip_efficiency'] ?? 0.9),
     minDischargeSoc: Number(o['min_discharge_soc'] ?? 20),
     sunsynkPlantId: String(o['sunsynk_plant_id'] ?? ''),
@@ -153,6 +155,7 @@ export function loadConfig(): Config {
     export_tariff_schedule: process.env.EXPORT_TARIFF_SCHEDULE,
     octopus_export_product: process.env.OCTOPUS_EXPORT_PRODUCT,
     octopus_export_tariff: process.env.OCTOPUS_EXPORT_TARIFF,
+    pre_charge_min_saving_pence: process.env.PRE_CHARGE_MIN_SAVING_PENCE,
     battery_round_trip_efficiency: process.env.BATTERY_ROUND_TRIP_EFFICIENCY,
     min_discharge_soc: process.env.MIN_DISCHARGE_SOC,
     sunsynk_plant_id: process.env.SUNSYNK_PLANT_ID,

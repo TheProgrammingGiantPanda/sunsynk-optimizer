@@ -1,5 +1,5 @@
 name: "Sunsynk Optimizer"
-version: "1.8.3"
+version: "1.9.0"
 slug: "sunsynk_optimizer"
 description: "Sets Sunsynk battery charge threshold based on Octopus Agile prices and solar forecasts"
 url: "https://github.com/TheProgrammingGiantPanda/sunsynk-optimizer"
@@ -48,6 +48,7 @@ options:
   export_tariff_schedule: "15:2024-01-01"
   octopus_export_product: ""
   octopus_export_tariff: ""
+  pre_charge_min_saving_pence: 5
   battery_round_trip_efficiency: 0.9
   min_discharge_soc: 20
   sunsynk_plant_id: ""
@@ -96,6 +97,7 @@ schema:
   export_tariff_schedule: str
   octopus_export_product: str
   octopus_export_tariff: str
+  pre_charge_min_saving_pence: float
   battery_round_trip_efficiency: float
   min_discharge_soc: int
   sunsynk_plant_id: str?

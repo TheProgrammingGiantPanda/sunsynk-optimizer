@@ -28,6 +28,7 @@ export interface CalculationResult {
   totalExpensiveDemandWh: number;  // Wh the battery needs to cover during expensive slots
   exportSlotCount: number;         // number of upcoming slots planned for battery export
   exportIncomePence: number;       // expected income from planned battery-to-grid sales
+  preChargeSlots: number;          // pre-peak 'expensive' slots bought because they beat the peak price after losses
 }
 
 // ── Module-scope constants and pure helpers ──────────────────────────────────
@@ -238,6 +239,41 @@ export function calculate(
     }
   }
 
+  // Pre-peak arbitrage: when there aren't enough cheap slots before the expensive period,
+  // the battery would run flat and the house would buy the peak at full price. If an earlier
+  // "expensive" slot is still clearly cheaper than a later one once round-trip losses are
+  // paid (price / eff + margin < later price), buy energy there to displace the later slot.
+  // Each candidate is compared with the dearest expensive slot that starts after it ends.
+  let preChargeSlots = 0;
+  const preChargeMinSaving = config.preChargeMinSavingPence ?? 5;
+  if (batteryToFill > 0 && expensiveRates.length > 0 && preChargeMinSaving >= 0) {
+    const cheapPreCoverWh = preExpensiveCandidates.length * config.batteryFillRateWh * eff;
+    const headroomWh = Math.max(0, config.batteryCapacityWh - batteryWatts - cheapPreCoverWh);
+    const shortfallWh = Math.min(Math.max(0, batteryToFill - cheapPreCoverWh), headroomWh);
+    const slotWh = config.batteryFillRateWh * eff;
+    const maxSlots = Math.ceil(shortfallWh / slotWh);
+    if (maxSlots > 0) {
+      const arbitrageCandidates = expensiveRates
+        .map(r => {
+          const laterMax = expensiveRates
+            .filter(o => new Date(o.valid_from).getTime() >= new Date(r.valid_to).getTime())
+            .reduce((m, o) => Math.max(m, o.value_inc_vat), -Infinity);
+          return { rate: r, benefit: laterMax - r.value_inc_vat / eff };
+        })
+        .filter(c => c.benefit >= preChargeMinSaving)
+        .sort((a, b) => a.rate.value_inc_vat - b.rate.value_inc_vat)
+        .slice(0, maxSlots);
+      if (arbitrageCandidates.length > 0) {
+        preChargeSlots = arbitrageCandidates.length;
+        const arbThreshold = Math.ceil(arbitrageCandidates[arbitrageCandidates.length - 1].rate.value_inc_vat);
+        if (arbThreshold > threshold) {
+          console.log(`[calculator] Raised threshold to ${arbThreshold}p: ${preChargeSlots} pre-peak slot(s) beat the later peak price after ${(eff * 100).toFixed(0)}% round-trip efficiency (min saving ${preChargeMinSaving}p)`);
+          threshold = arbThreshold;
+        }
+      }
+    }
+  }
+
   // ── 7. Cost savings ───────────────────────────────────────────────────────
   const purchasedSlots    = blocksToUse > 0 ? importCandidates.slice(0, blocksToUse) : [];
   const energyPurchasedWh = blocksToUse > 0 ? Math.min(blocksToUse, importCandidates.length) * config.batteryFillRateWh : 0;
@@ -378,5 +414,6 @@ export function calculate(
     totalExpensiveDemandWh: Math.floor(totalExpensiveDemandWh),
     exportSlotCount,
     exportIncomePence: Math.round(exportIncomePence * 10) / 10,
+    preChargeSlots,
   };
 }
