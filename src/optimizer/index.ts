@@ -80,8 +80,10 @@ async function main() {
   if (isNaN(config.expensiveThresholdPence) || config.expensiveThresholdPence <= 0)
     throw new Error(`Invalid config: expensiveThresholdPence must be a positive number (got ${config.expensiveThresholdPence})`);
 
+  const addonYaml = fs.readFileSync(path.join(__dirname, '../../config.yaml'), 'utf-8');
+  const version = addonYaml.match(/^version:\s*"?([^"\s]+)"?/m)?.[1] ?? 'unknown';
   console.log('================================================');
-  console.log('  Sunsynk Battery Optimizer  v1.7.2  starting  ');
+  console.log(`  Sunsynk Battery Optimizer  v${version}  starting  `);
   console.log('================================================');
   console.log(`[optimizer] Expensive threshold: ${config.expensiveThresholdPence}p/kWh`);
   console.log(`[optimizer] Battery capacity: ${config.batteryCapacityWh} Wh`);
@@ -486,7 +488,7 @@ async function main() {
     // Use auto-tuned confidence factor if available, otherwise static config
     const effectiveConfidenceFactor = computedConfidenceFactor ?? config.forecastConfidenceFactor;
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, minDischargeSoc: effectiveMinSoc, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);

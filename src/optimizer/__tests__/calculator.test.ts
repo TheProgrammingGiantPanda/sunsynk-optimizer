@@ -85,13 +85,26 @@ describe('calculate — core behaviour', () => {
 
   it('battery covers expensive demand: fills remaining capacity with cheap slots', () => {
     // 6 expensive slots × 500 Wh = 3000 Wh demand; battery at 50% = 5000 Wh.
-    // Pre-peak drain: 10 cheap slots × 500 Wh = 5000 Wh → batteryToFill = 3000-5000+5000 = 3000.
+    // Pre-peak drain: 10 cheap slots × 500 Wh = 5000 Wh → usable = 5000-2000 (20% min SOC floor) = 3000 → batteryToFill = 3000-3000+5000 = 5000.
     // Remaining capacity = 5000 Wh → opportunistic fill: ceil(5000/2500) = 2 blocks.
     const result = calculate(BASE_CONFIG, 50, [], RATES);
-    expect(result.batteryToFill).toBe(3000);      // deficit after accounting for pre-peak drain
+    expect(result.batteryToFill).toBe(5000);      // deficit after min-SOC floor and pre-peak drain
     expect(result.totalExpensiveDemandWh).toBe(3000);
     expect(result.blocks).toBe(2);                // fill remaining 5000 Wh with 2 cheap slots
     expect(result.threshold).toBe(11);            // 2nd cheapest cheap slot (11p)
+  });
+
+  it('battery below the min-SOC floor contributes nothing (clamps usable to 0)', () => {
+    // 10% = 1000 Wh is below the 20% (2000 Wh) floor → usable 0, same plan as an empty battery.
+    const result = calculate(BASE_CONFIG, 10, [], RATES);
+    expect(result.batteryToFill).toBe(8000);      // 3000 demand + 5000 pre-peak drain - 0 usable
+    expect(result.batteryToFill).toBe(calculate(BASE_CONFIG, 0, [], RATES).batteryToFill);
+  });
+
+  it('a higher minDischargeSoc (e.g. low-solar backup 40%) increases batteryToFill', () => {
+    // 50% = 5000 Wh; 40% floor = 4000 Wh → usable 1000 → 3000 - 1000 + 5000 = 7000 (vs 5000 at 20%).
+    const result = calculate({ ...BASE_CONFIG, minDischargeSoc: 40 }, 50, [], RATES);
+    expect(result.batteryToFill).toBe(7000);
   });
 
   it('fills battery to capacity when deficit exists', () => {
@@ -413,10 +426,10 @@ describe('calculate — horizon behaviour', () => {
 
   it('battery exactly covers expensive demand: fills remaining capacity with cheap slots', () => {
     // demand=3000 Wh; battery=30% = 3000 Wh; pre-peak drain=5000 Wh
-    // batteryToFill = max(0, 3000-3000+5000) = 5000; 7000 Wh capacity remains
+    // usable = 3000-2000 = 1000 → batteryToFill = max(0, 3000-1000+5000) = 7000; 7000 Wh capacity remains
     // ceil(7000/2500) = 3 opportunistic blocks
     const result = calculate(BASE_CONFIG, 30, [], RATES);
-    expect(result.batteryToFill).toBe(5000);
+    expect(result.batteryToFill).toBe(7000);
     expect(result.blocks).toBe(3);   // fill remaining 7000 Wh with 3 cheap slots
   });
 
