@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.3] - 2026-11-10
+
+### Fixed
+- Add-on crashed on startup in 1.8.2 (`ENOENT: /app/config.yaml`) because the Dockerfile never copied `config.yaml` into the image. It is now copied, and the startup banner falls back to `unknown` if the file can't be read, so it can never crash startup
+
 ## [1.8.2] - 2026-11-10
 
 ### Fixed
