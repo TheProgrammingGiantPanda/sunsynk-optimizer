@@ -94,6 +94,19 @@ describe('calculate — core behaviour', () => {
     expect(result.threshold).toBe(11);            // 2nd cheapest cheap slot (11p)
   });
 
+  it('battery below the min-SOC floor contributes nothing (clamps usable to 0)', () => {
+    // 10% = 1000 Wh is below the 20% (2000 Wh) floor → usable 0, same plan as an empty battery.
+    const result = calculate(BASE_CONFIG, 10, [], RATES);
+    expect(result.batteryToFill).toBe(8000);      // 3000 demand + 5000 pre-peak drain - 0 usable
+    expect(result.batteryToFill).toBe(calculate(BASE_CONFIG, 0, [], RATES).batteryToFill);
+  });
+
+  it('a higher minDischargeSoc (e.g. low-solar backup 40%) increases batteryToFill', () => {
+    // 50% = 5000 Wh; 40% floor = 4000 Wh → usable 1000 → 3000 - 1000 + 5000 = 7000 (vs 5000 at 20%).
+    const result = calculate({ ...BASE_CONFIG, minDischargeSoc: 40 }, 50, [], RATES);
+    expect(result.batteryToFill).toBe(7000);
+  });
+
   it('fills battery to capacity when deficit exists', () => {
     // battery 0%, capacity 10000 Wh → opportunistic fill: ceil(10000/2500) = 4 blocks
     // batteryToFill = 3000 (demand) + 5000 (pre-peak drain) - 0 (battery) = 8000 Wh
