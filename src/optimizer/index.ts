@@ -80,8 +80,14 @@ async function main() {
   if (isNaN(config.expensiveThresholdPence) || config.expensiveThresholdPence <= 0)
     throw new Error(`Invalid config: expensiveThresholdPence must be a positive number (got ${config.expensiveThresholdPence})`);
 
-  const addonYaml = fs.readFileSync(path.join(__dirname, '../../config.yaml'), 'utf-8');
-  const version = addonYaml.match(/^version:\s*"?([^"\s]+)"?/m)?.[1] ?? 'unknown';
+  // Version banner is cosmetic — never let a missing/unreadable config.yaml crash startup
+  let version = 'unknown';
+  try {
+    const addonYaml = fs.readFileSync(path.join(__dirname, '../../config.yaml'), 'utf-8');
+    version = addonYaml.match(/^version:\s*"?([^"\s]+)"?/m)?.[1] ?? 'unknown';
+  } catch {
+    // ignore
+  }
   console.log('================================================');
   console.log(`  Sunsynk Battery Optimizer  v${version}  starting  `);
   console.log('================================================');

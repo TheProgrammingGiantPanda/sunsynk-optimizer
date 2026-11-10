@@ -2,7 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json tsconfig.json ./
+COPY package*.json tsconfig.json config.yaml ./
 COPY src/ ./src/
 
 # Install all deps (including devDeps) so TypeScript is available for the build
