@@ -488,7 +488,7 @@ async function main() {
     // Use auto-tuned confidence factor if available, otherwise static config
     const effectiveConfidenceFactor = computedConfidenceFactor ?? config.forecastConfidenceFactor;
 
-    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
+    const result = calculate({ ...config, batteryFillRateWh, batteryCapacityWh, expensiveThresholdPence, minDischargeSoc: effectiveMinSoc, avgConsumptionWh: effectiveAvgConsumptionWh, forecastConfidenceFactor: effectiveConfidenceFactor }, batteryPct, pvForecasts, carbonRates, slotProfile, hpAdjustment, evLoadWh, exportRatePence, exportRates);
 
     // Accumulate daily savings; reset at midnight
     const today = new Date().toISOString().slice(0, 10);

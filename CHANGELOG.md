@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.2] - 2026-11-10
+
+### Fixed
+- Battery charge below the minimum discharge SOC is no longer counted as available to cover expensive slots, so the optimizer now charges before the peak instead of waiting until after it. The effective min SOC (including the low-solar backup value) is now passed to the calculator
+
 ## [1.8.1] - 2026-06-19
 
 ### Fixed

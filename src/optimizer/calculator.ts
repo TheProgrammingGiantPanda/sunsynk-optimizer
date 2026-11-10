@@ -108,6 +108,10 @@ export function calculate(
   const now = new Date();
   const eff = Math.max(0.5, Math.min(1, config.batteryRoundTripEfficiency ?? 0.9));
   const batteryWatts = (config.batteryCapacityWh * batteryPct) / 100;
+  // The inverter stops discharging at the min-SOC floor, so energy below it can't cover
+  // expensive slots. Counting it made the plan think a 50% battery was fully usable.
+  const minDischargeSocWh = config.batteryCapacityWh * ((config.minDischargeSoc ?? 20) / 100);
+  const usableBatteryWh = Math.max(0, batteryWatts - minDischargeSocWh);
 
   // ── 1. All upcoming Agile slots ───────────────────────────────────────────
   // Use every available rate — the horizon is naturally bounded by Agile data availability
@@ -164,9 +168,9 @@ export function calculate(
   // Battery covers expensive demand; PV surplus during cheap slots reduces what we need to buy.
   // Round-trip efficiency applies to energy that goes grid → battery → load.
   const batteryToFill   = Math.max(0,
-    totalExpensiveDemandWh - batteryWatts + netPrePeakDrainWh - pvSurplusCheapWh * eff
+    totalExpensiveDemandWh - usableBatteryWh + netPrePeakDrainWh - pvSurplusCheapWh * eff
   );
-  const batteryToFillNoPV = Math.max(0, totalExpensiveDemandNoPV - batteryWatts);
+  const batteryToFillNoPV = Math.max(0, totalExpensiveDemandNoPV - usableBatteryWh);
 
   // ── 6. Pick cheapest cheap slots to fill the battery ─────────────────────
   // Split cheap slots into pre-expensive (before the first expensive slot) and post-expensive.
@@ -261,7 +265,6 @@ export function calculate(
   );
 
   // ── 8. Sell-to-grid planning ──────────────────────────────────────────────
-  const minDischargeSocWh = config.batteryCapacityWh * ((config.minDischargeSoc ?? 20) / 100);
   const breakEvenSell = windowRates.length > 0
     ? windowRates[0].value_inc_vat / eff
     : Infinity;
